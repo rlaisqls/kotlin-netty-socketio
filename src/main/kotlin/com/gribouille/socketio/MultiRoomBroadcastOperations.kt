@@ -1,28 +1,14 @@
-/**
- * Copyright (c) 2012-2019 Nikita Koksharov
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-package com.example.gribouille
 
-import com.corundumstudio.socketio.protocol.Packet
+package com.gribouille.socketio
+
+import com.gribouille.socketio.protocol.Packet
 
 /**
  * author: liangjiaqi
  * date: 2020/8/8 6:02 PM
  */
-class MultiRoomBroadcastOperations(private val broadcastOperations: Collection<BroadcastOperations>?) :
-    BroadcastOperations {
+class MultiRoomBroadcastOperations(private val broadcastOperations: Collection<com.gribouille.socketio.BroadcastOperations>?) :
+    com.gribouille.socketio.BroadcastOperations {
     override val clients: Collection<Any?>
         get() {
             val clients: MutableSet<SocketIOClient?> = HashSet<SocketIOClient?>()
@@ -35,7 +21,7 @@ class MultiRoomBroadcastOperations(private val broadcastOperations: Collection<B
             return clients
         }
 
-    override fun <T> send(packet: Packet?, ackCallback: BroadcastAckCallback<T>?) {
+    override fun <T> send(packet: Packet?, ackCallback: com.gribouille.socketio.BroadcastAckCallback<T>?) {
         if (broadcastOperations == null || broadcastOperations.size == 0) {
             return
         }
@@ -53,7 +39,7 @@ class MultiRoomBroadcastOperations(private val broadcastOperations: Collection<B
         }
     }
 
-    override fun <T> sendEvent(name: String?, data: Any?, ackCallback: BroadcastAckCallback<T>?) {
+    override fun <T> sendEvent(name: String?, data: Any?, ackCallback: com.gribouille.socketio.BroadcastAckCallback<T>?) {
         if (broadcastOperations == null || broadcastOperations.size == 0) {
             return
         }
@@ -66,7 +52,7 @@ class MultiRoomBroadcastOperations(private val broadcastOperations: Collection<B
         name: String?,
         data: Any?,
         excludedClient: SocketIOClient?,
-        ackCallback: BroadcastAckCallback<T>?
+        ackCallback: com.gribouille.socketio.BroadcastAckCallback<T>?
     ) {
         if (broadcastOperations == null || broadcastOperations.size == 0) {
             return

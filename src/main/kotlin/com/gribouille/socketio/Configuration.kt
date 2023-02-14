@@ -1,21 +1,7 @@
-/**
- * Copyright (c) 2012-2019 Nikita Koksharov
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-package com.example.gribouille
 
-import com.corundumstudio.socketio.handler.SuccessAuthorizationListener
+package com.gribouille.socketio
+
+import com.gribouille.socketio.handler.SuccessAuthorizationListener
 import java.io.InputStream
 import java.util.*
 
@@ -26,7 +12,7 @@ class Configuration {
      *
      * @param exceptionListener - listener
      *
-     * @see com.corundumstudio.socketio.listener.ExceptionListener
+     * @see com.gribouille.socketio.listener.ExceptionListener
      */
     var exceptionListener: ExceptionListener = DefaultExceptionListener()
     var context = "/socket.io"
@@ -173,11 +159,11 @@ class Configuration {
      *
      * @param clientStoreFactory - implements StoreFactory
      *
-     * @see com.corundumstudio.socketio.store.MemoryStoreFactory
+     * @see com.gribouille.socketio.store.MemoryStoreFactory
      *
-     * @see com.corundumstudio.socketio.store.RedissonStoreFactory
+     * @see com.gribouille.socketio.store.RedissonStoreFactory
      *
-     * @see com.corundumstudio.socketio.store.HazelcastStoreFactory
+     * @see com.gribouille.socketio.store.HazelcastStoreFactory
      */
     var storeFactory: StoreFactory = MemoryStoreFactory()
 
@@ -198,9 +184,9 @@ class Configuration {
      *
      * @param authorizationListener - authorization listener itself
      *
-     * @see com.corundumstudio.socketio.AuthorizationListener
+     * @see com.gribouille.socketio.AuthorizationListener
      */
-    var authorizationListener: AuthorizationListener = SuccessAuthorizationListener()
+    var authorizationListener: com.gribouille.socketio.AuthorizationListener = SuccessAuthorizationListener()
 
     /**
      * Auto ack-response mode
@@ -211,7 +197,7 @@ class Configuration {
      *
      * @param ackMode - ack mode
      */
-    var ackMode = AckMode.AUTO_SUCCESS_ONLY
+    var ackMode = com.gribouille.socketio.AckMode.AUTO_SUCCESS_ONLY
 
     /**
      * Adds **Server** header with lib version to http response.
@@ -274,7 +260,7 @@ class Configuration {
      *
      * @param conf - Configuration object to clone
      */
-    internal constructor(conf: Configuration) {
+    internal constructor(conf: com.gribouille.socketio.Configuration) {
         bossThreads = conf.bossThreads
         workerThreads = conf.workerThreads
         isUseLinuxNativeEpoll = conf.isUseLinuxNativeEpoll
@@ -286,7 +272,7 @@ class Configuration {
             try {
                 javaClass.classLoader.loadClass("com.fasterxml.jackson.databind.ObjectMapper")
                 try {
-                    val jjs = javaClass.classLoader.loadClass("com.corundumstudio.socketio.protocol.JacksonJsonSupport")
+                    val jjs = javaClass.classLoader.loadClass("com.gribouille.socketio.protocol.JacksonJsonSupport")
                     val js: JsonSupport = jjs.getConstructor().newInstance() as JsonSupport
                     conf.jsonSupport = js
                 } catch (e: Exception) {
@@ -296,7 +282,7 @@ class Configuration {
                 throw IllegalArgumentException("Can't find jackson lib in classpath", e)
             }
         }
-        jsonSupport = JsonSupportWrapper(conf.jsonSupport)
+        jsonSupport = com.gribouille.socketio.JsonSupportWrapper(conf.jsonSupport)
         context = conf.context
         isAllowCustomRequests = conf.isAllowCustomRequests
         keyStorePassword = conf.keyStorePassword
