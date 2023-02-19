@@ -12,7 +12,6 @@ import com.gribouille.socketio.protocol.PacketDecoder
 import io.netty.buffer.ByteBuf
 import io.netty.channel.Channel
 import io.netty.channel.ChannelFutureListener
-import io.netty.channel.ChannelHandler
 import io.netty.channel.ChannelHandler.Sharable
 import io.netty.channel.ChannelHandlerContext
 import io.netty.channel.ChannelInboundHandlerAdapter
@@ -41,48 +40,46 @@ class PollingTransport(
         msg: Any
     ) {
         if (msg is FullHttpRequest) {
-            val req = msg as FullHttpRequest
-            val queryDecoder = QueryStringDecoder(req.uri())
-            val transport = queryDecoder.parameters().get("transport")
-            if (transport != null && NAME == transport[0]) {
-                val sid = queryDecoder.parameters().get("sid")
-                val j = queryDecoder.parameters().get("j")
-                val b64 = queryDecoder.parameters().get("b64")
-                val origin: String = req.headers().get(HttpHeaderNames.ORIGIN)
-                ctx.channel().attr(EncoderHandler.ORIGIN).set(origin)
-                val userAgent: String = req.headers().get(HttpHeaderNames.USER_AGENT)
-                ctx.channel().attr(EncoderHandler.USER_AGENT).set(userAgent)
-                if (j != null && j[0] != null) {
-                    val index = Integer.valueOf(j[0])
+            val queryDecoder = QueryStringDecoder(msg.uri())
+            if (getParam("transport", queryDecoder) == NAME) {
+
+                ctx.channel().attr(EncoderHandler.ORIGIN).set(
+                    msg.headers().get(HttpHeaderNames.ORIGIN)
+                )
+                ctx.channel().attr(EncoderHandler.USER_AGENT).set(
+                    msg.headers().get(HttpHeaderNames.USER_AGENT)
+                )
+
+                getParam("j", queryDecoder)?.let { j ->
+                    val index = Integer.valueOf(j)
                     ctx.channel().attr(EncoderHandler.JSONP_INDEX).set(index)
                 }
-                if (b64 != null && b64[0] != null) {
-                    var flag = b64[0]
-                    if ("true" == flag) {
-                        flag = "1"
-                    } else if ("false" == flag) {
-                        flag = "0"
-                    }
-                    val enable = Integer.valueOf(flag)
-                    ctx.channel().attr(EncoderHandler.B64).set(enable == 1)
+
+                getParam("b64", queryDecoder)?.let { b64 ->
+                    val enable = (b64 == "1" || b64 == "true")
+                    ctx.channel().attr(EncoderHandler.B64).set(enable)
                 }
+
                 try {
-                    if (sid != null && sid[0] != null) {
-                        val sessionId = UUID.fromString(sid[0])
-                        handleMessage(req, sessionId, queryDecoder, ctx)
-                    } else {
+                    getParam("sid", queryDecoder)?.let { sid ->
+                        val sessionId = UUID.fromString(sid)
+                        handleMessage(msg, sessionId, queryDecoder, ctx)
+                    } ?: run {
                         // first connection
                         val client = ctx.channel().attr(ClientHead.CLIENT).get()
-                        handleMessage(req, client.sessionId!!, queryDecoder, ctx)
+                        handleMessage(msg, client.sessionId!!, queryDecoder, ctx)
                     }
                 } finally {
-                    req.release()
+                    msg.release()
                 }
                 return
             }
         }
         ctx.fireChannelRead(msg)
     }
+
+    private fun getParam(pramName: String, queryDecoder: QueryStringDecoder) =
+        queryDecoder.parameters()[pramName]?.get(0)
 
     @Throws(IOException::class)
     private fun handleMessage(
@@ -91,20 +88,28 @@ class PollingTransport(
         queryDecoder: QueryStringDecoder,
         ctx: ChannelHandlerContext
     ) {
-        val origin: String = req.headers().get(HttpHeaderNames.ORIGIN)
+        val origin = req.headers().get(HttpHeaderNames.ORIGIN)
+
         if (queryDecoder.parameters().containsKey("disconnect")) {
-            val client = clientsBox.get(sessionId)!!
+            val client = clientsBox[sessionId]!!
             client.onChannelDisconnect()
             ctx.channel().writeAndFlush(XHRPostMessage(origin, sessionId))
-        } else if (HttpMethod.POST == req.method()) {
-            onPost(sessionId, ctx, origin, req.content())
-        } else if (HttpMethod.GET == req.method()) {
-            onGet(sessionId, ctx, origin)
-        } else if (HttpMethod.OPTIONS == req.method()) {
-            onOptions(sessionId, ctx, origin)
         } else {
-            log.error("Wrong {} method invocation for {}", req.method(), sessionId)
-            sendError(ctx)
+            when (req.method()) {
+                HttpMethod.POST -> {
+                    onPost(sessionId, ctx, origin, req.content())
+                }
+                HttpMethod.GET -> {
+                    onGet(sessionId, ctx, origin)
+                }
+                HttpMethod.OPTIONS -> {
+                    onOptions(sessionId, ctx, origin)
+                }
+                else -> {
+                    log.error("Wrong {} method invocation for {}", req.method(), sessionId)
+                    sendError(ctx)
+                }
+            }
         }
     }
 
@@ -119,21 +124,24 @@ class PollingTransport(
     }
 
     @Throws(IOException::class)
-    private fun onPost(sessionId: UUID, ctx: ChannelHandlerContext, origin: String, content: ByteBuf) {
+    private fun onPost(
+        sessionId: UUID,
+        ctx: ChannelHandlerContext,
+        origin: String,
+        content: ByteBuf
+    ) {
         var content: ByteBuf = content
-        val client: ClientHead? = clientsBox.get(sessionId)
-        if (client == null) {
+        val client = clientsBox[sessionId] ?: run {
             log.error("{} is not registered. Closing connection", sessionId)
             sendError(ctx)
             return
         }
 
-
-        // release POST response before message processing
+        // 메시지 처리 전 POST 응답 release
         ctx.channel().writeAndFlush(XHRPostMessage(origin, sessionId))
         val b64 = ctx.channel().attr(EncoderHandler.B64).get()
-        if (b64 != null && b64) {
-            val jsonIndex: Int = ctx.channel().attr(EncoderHandler.JSONP_INDEX).get()
+        if (b64 == true) {
+            val jsonIndex = ctx.channel().attr(EncoderHandler.JSONP_INDEX).get()
             content = decoder.preprocessJson(jsonIndex, content)
         }
         ctx.pipeline().fireChannelRead(
