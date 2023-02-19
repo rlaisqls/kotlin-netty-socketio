@@ -1,6 +1,6 @@
 # gribouille
 
-[netty socketio](https://github.com/mrniko/netty-socketio)를 kotlin으로 재작성해보는 프로젝트입니다.
+[netty socketio](https://github.com/mrniko/netty-socketio)를 kotlin으로 재작성 및 개선해보는 프로젝트입니다.
 
 ## 목표
 
