@@ -45,7 +45,12 @@ class HashedWheelTimeoutScheduler : CancelableScheduler {
         executorService.newTimeout({ runnable.run() }, delay.toLong(), unit)
     }
 
-    override fun scheduleCallback(key: SchedulerKey, runnable: Runnable, delay: Int, unit: TimeUnit?) {
+    override fun scheduleCallback(
+        key: SchedulerKey,
+        runnable: Runnable,
+        delay: Int,
+        unit: TimeUnit?
+    ) {
         val timeout = executorService.newTimeout({
             ctx!!.executor().execute {
                 try {
@@ -58,14 +63,24 @@ class HashedWheelTimeoutScheduler : CancelableScheduler {
         replaceScheduledFuture(key, timeout)
     }
 
-    override fun schedule(key: SchedulerKey, runnable: Runnable, delay: Int, unit: TimeUnit?) {
-        val timeout = executorService.newTimeout({
-            try {
-                runnable.run()
-            } finally {
-                scheduledFutures.remove(key)
-            }
-        }, delay.toLong(), unit)
+    override fun schedule(
+        key: SchedulerKey,
+        runnable: Runnable,
+        delay: Int,
+        unit: TimeUnit?
+    ) {
+        val timeout = executorService.newTimeout(
+            {
+                try {
+                    runnable.run()
+                } finally {
+                    scheduledFutures.remove(key)
+                }
+            },
+            delay.toLong(),
+            unit
+        )
+
         replaceScheduledFuture(key, timeout)
     }
 

@@ -45,6 +45,7 @@ class SocketIOChannelInitializer : ChannelInitializer<Channel>(), Disconnectable
     private var packetHandler: InPacketHandler? = null
     private var sslContext: SSLContext? = null
     private var configuration: Configuration? = null
+
     override fun handlerAdded(ctx: ChannelHandlerContext) {
         scheduler.update(ctx)
     }

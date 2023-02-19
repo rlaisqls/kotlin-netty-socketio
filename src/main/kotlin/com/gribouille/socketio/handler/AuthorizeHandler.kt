@@ -1,4 +1,3 @@
-
 package com.gribouille.socketio.handler
 
 import com.gribouille.socketio.HandshakeData
@@ -68,13 +67,18 @@ class AuthorizeHandler(
     @Throws(Exception::class)
     override fun channelActive(ctx: ChannelHandlerContext) {
         val key = SchedulerKey(Type.PING_TIMEOUT, ctx.channel())
-        scheduler.schedule(key, {
-            ctx.channel().close()
-            log.debug(
-                "Client with ip {} opened channel but doesn't send any data! Channel closed!",
-                ctx.channel().remoteAddress()
-            )
-        }, configuration.firstDataTimeout, TimeUnit.MILLISECONDS)
+        scheduler.schedule(
+            key = key,
+            delay = configuration.firstDataTimeout,
+            unit = TimeUnit.MILLISECONDS,
+            runnable = {
+                ctx.channel().close()
+                log.debug(
+                    "Client with ip {} opened channel but doesn't send any data! Channel closed!",
+                    ctx.channel().remoteAddress()
+                )
+            }
+        )
         super.channelActive(ctx)
     }
 

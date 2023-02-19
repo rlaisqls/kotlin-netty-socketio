@@ -180,15 +180,20 @@ class WebSocketTransport(
         authorizeHandler.connect(client)
         if (client.getCurrentTransport() === Transport.POLLING) {
             val key = SchedulerKey(SchedulerKey.Type.UPGRADE_TIMEOUT, sessionId)
-            scheduler.schedule(key, Runnable {
-                val clientHead: ClientHead? = clientsBox.get(sessionId)
-                if (clientHead != null) {
-                    if (log.isDebugEnabled) {
-                        log.debug("client did not complete upgrade - closing transport")
+            scheduler.schedule(
+                key = key,
+                delay = configuration.upgradeTimeout,
+                unit = TimeUnit.MILLISECONDS,
+                runnable = {
+                    val clientHead: ClientHead? = clientsBox[sessionId]
+                    if (clientHead != null) {
+                        if (log.isDebugEnabled) {
+                            log.debug("client did not complete upgrade - closing transport")
+                        }
+                        clientHead.onChannelDisconnect()
                     }
-                    clientHead.onChannelDisconnect()
                 }
-            }, configuration.upgradeTimeout, TimeUnit.MILLISECONDS)
+            )
         }
         log.debug("сlient {} handshake completed", sessionId)
     }

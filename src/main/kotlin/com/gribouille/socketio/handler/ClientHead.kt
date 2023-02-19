@@ -1,4 +1,3 @@
-
 package com.gribouille.socketio.handler
 
 import com.gribouille.socketio.HandshakeData
@@ -89,26 +88,35 @@ class ClientHead(
 
     fun schedulePing() {
         cancelPing()
-        val key = SchedulerKey(Type.PING, sessionId)
-        scheduler.schedule(key, {
-            val client = clientsBox[sessionId]
-            if (client != null) {
-                client.send(Packet(PacketType.PING))
-                schedulePing()
+        scheduler.schedule(
+            key = SchedulerKey(Type.PING, sessionId),
+            delay = configuration.pingInterval,
+            unit = TimeUnit.MILLISECONDS,
+            runnable = {
+                val client = clientsBox[sessionId]
+                if (client != null) {
+                    client.send(Packet(PacketType.PING))
+                    schedulePing()
+                }
             }
-        }, configuration.pingInterval, TimeUnit.MILLISECONDS)
+        )
     }
 
     fun schedulePingTimeout() {
         cancelPingTimeout()
         val key = SchedulerKey(Type.PING_TIMEOUT, sessionId)
-        scheduler.schedule(key, {
-            val client = clientsBox[sessionId]
-            if (client != null) {
-                client.disconnect()
-                log.debug("{} removed due to ping timeout", sessionId)
+        scheduler.schedule(
+            key = key,
+            delay = configuration.pingTimeout + configuration.pingInterval,
+            unit = TimeUnit.MILLISECONDS,
+            runnable = {
+                val client = clientsBox[sessionId]
+                if (client != null) {
+                    client.disconnect()
+                    log.debug("{} removed due to ping timeout", sessionId)
+                }
             }
-        }, configuration.pingTimeout + configuration.pingInterval, TimeUnit.MILLISECONDS)
+        )
     }
 
     fun send(packet: Packet?, transport: Transport): ChannelFuture? {
