@@ -5,6 +5,7 @@ import com.gribouille.socketio.HandshakeData
 import io.netty.channel.Channel
 import io.netty.util.internal.PlatformDependent
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 
 class ClientsBox {
     private val uuid2clients: MutableMap<UUID?, ClientHead> = ConcurrentHashMap()

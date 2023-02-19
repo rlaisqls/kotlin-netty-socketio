@@ -2,9 +2,23 @@
 package com.gribouille.socketio
 
 import com.gribouille.socketio.listener.*
+import com.gribouille.socketio.namespace.Namespace
+import com.gribouille.socketio.namespace.NamespacesHub
 import io.netty.bootstrap.ServerBootstrap
+import io.netty.channel.ChannelOption
+import io.netty.channel.EventLoopGroup
+import io.netty.channel.FixedRecvByteBufAllocator
+import io.netty.channel.RecvByteBufAllocator
+import io.netty.channel.ServerChannel
+import io.netty.channel.WriteBufferWaterMark
+import io.netty.channel.epoll.EpollEventLoopGroup
+import io.netty.channel.epoll.EpollServerSocketChannel
+import io.netty.channel.nio.NioEventLoopGroup
+import io.netty.channel.socket.nio.NioServerSocketChannel
 import io.netty.util.concurrent.Future
+import io.netty.util.concurrent.FutureListener
 import org.slf4j.LoggerFactory
+import java.net.InetSocketAddress
 import java.util.*
 
 /**
@@ -32,39 +46,22 @@ class SocketIOServer(configuration: Configuration) : ClientListeners {
     }
 
     val allClients: Collection<com.gribouille.socketio.SocketIOClient>
-        /**
-         * Get all clients connected to default namespace
-         *
-         * @return clients collection
-         */
-        get() = namespacesHub.get(Namespace.DEFAULT_NAME).getAllClients()
+        get() = namespacesHub.get(Namespace.DEFAULT_NAME).allClients
 
-    /**
-     * Get client by uuid from default namespace
-     *
-     * @param uuid - id of client
-     * @return client
-     */
-    fun getClient(uuid: UUID?): SocketIOClient {
-        return namespacesHub.get(Namespace.DEFAULT_NAME).getClient(uuid)
+    fun getClient(uuid: UUID): SocketIOClient {
+        return namespacesHub[Namespace.DEFAULT_NAME].getClient(uuid)!!
     }
 
-    val allNamespaces: Collection<com.gribouille.socketio.SocketIONamespace>
-        /**
-         * Get all namespaces
-         *
-         * @return namespaces collection
-         */
-        get() = namespacesHub.getAllNamespaces()
+    val allNamespaces: Collection<SocketIONamespace>
+        get() = namespacesHub.allNamespaces
     val broadcastOperations: BroadcastOperations
         get() {
-            val namespaces: Collection<SocketIONamespace> = namespacesHub.getAllNamespaces()
-            val list: MutableList<BroadcastOperations?> = ArrayList<BroadcastOperations?>()
+            val namespaces: Collection<SocketIONamespace> = namespacesHub.allNamespaces
+            val list: MutableList<BroadcastOperations> = ArrayList<BroadcastOperations>()
             var broadcast: BroadcastOperations? = null
             if (namespaces != null && namespaces.size > 0) {
                 for (n in namespaces) {
-                    broadcast = n.getBroadcastOperations()
-                    list.add(broadcast)
+                    list.add(n.broadcastOperations!!)
                 }
             }
             return MultiRoomBroadcastOperations(list)
@@ -77,14 +74,13 @@ class SocketIOServer(configuration: Configuration) : ClientListeners {
      * @param room - name of room
      * @return broadcast operations
      */
-    fun getRoomOperations(room: String?): BroadcastOperations {
-        val namespaces: Collection<SocketIONamespace> = namespacesHub.getAllNamespaces()
-        val list: MutableList<BroadcastOperations?> = ArrayList<BroadcastOperations?>()
+    fun getRoomOperations(room: String): BroadcastOperations {
+        val namespaces: Collection<SocketIONamespace> = namespacesHub.allNamespaces
+        val list: MutableList<BroadcastOperations> = ArrayList<BroadcastOperations>()
         var broadcast: BroadcastOperations? = null
         if (namespaces != null && namespaces.size > 0) {
             for (n in namespaces) {
-                broadcast = n.getRoomOperations(room)
-                list.add(broadcast)
+                list.add(n.getRoomOperations(room)!!)
             }
         }
         return MultiRoomBroadcastOperations(list)
@@ -103,11 +99,11 @@ class SocketIOServer(configuration: Configuration) : ClientListeners {
      * @return void
      */
     fun startAsync(): Future<Void> {
-        log.info("Session store / pubsub factory used: {}", configCopy.getStoreFactory())
+        log.info("Session store / pubsub factory used: {}", configCopy.storeFactory)
         initGroups()
         pipelineFactory.start(configCopy, namespacesHub)
         var channelClass: Class<out ServerChannel?> = NioServerSocketChannel::class.java
-        if (configCopy.isUseLinuxNativeEpoll()) {
+        if (configCopy.isUseLinuxNativeEpoll) {
             channelClass = EpollServerSocketChannel::class.java
         }
         val b = ServerBootstrap()
@@ -115,75 +111,72 @@ class SocketIOServer(configuration: Configuration) : ClientListeners {
             .channel(channelClass)
             .childHandler(pipelineFactory)
         applyConnectionOptions(b)
-        var addr: InetSocketAddress? = InetSocketAddress(configCopy.getPort())
-        if (configCopy.getHostname() != null) {
-            addr = InetSocketAddress(configCopy.getHostname(), configCopy.getPort())
+        var addr: InetSocketAddress? = InetSocketAddress(configCopy.port)
+        if (configCopy.hostname != null) {
+            addr = InetSocketAddress(configCopy.hostname, configCopy.port)
         }
         return b.bind(addr).addListener(object : FutureListener<Void?> {
             @Throws(Exception::class)
             override fun operationComplete(future: Future<Void?>) {
                 if (future.isSuccess) {
-                    log.info("SocketIO server started at port: {}", configCopy.getPort())
+                    log.info("SocketIO server started at port: {}", configCopy.port)
                 } else {
-                    log.error("SocketIO server start failed at port: {}!", configCopy.getPort())
+                    log.error("SocketIO server start failed at port: {}!", configCopy.port)
                 }
             }
         })
     }
 
     protected fun applyConnectionOptions(bootstrap: ServerBootstrap) {
-        val config: SocketConfig = configCopy.getSocketConfig()
-        bootstrap.childOption(ChannelOption.TCP_NODELAY, config.isTcpNoDelay())
-        if (config.getTcpSendBufferSize() !== -1) {
-            bootstrap.childOption(ChannelOption.SO_SNDBUF, config.getTcpSendBufferSize())
+        val config: SocketConfig = configCopy.socketConfig
+        bootstrap.childOption(ChannelOption.TCP_NODELAY, config.isTcpNoDelay)
+        if (config.tcpSendBufferSize !== -1) {
+            bootstrap.childOption(ChannelOption.SO_SNDBUF, config.tcpSendBufferSize)
         }
-        if (config.getTcpReceiveBufferSize() !== -1) {
-            bootstrap.childOption(ChannelOption.SO_RCVBUF, config.getTcpReceiveBufferSize())
+        if (config.tcpReceiveBufferSize !== -1) {
+            bootstrap.childOption(ChannelOption.SO_RCVBUF, config.tcpReceiveBufferSize)
             bootstrap.childOption<RecvByteBufAllocator>(
                 ChannelOption.RCVBUF_ALLOCATOR,
-                FixedRecvByteBufAllocator(config.getTcpReceiveBufferSize())
+                FixedRecvByteBufAllocator(config.tcpReceiveBufferSize)
             )
         }
         //default value @see WriteBufferWaterMark.DEFAULT
-        if (config.getWriteBufferWaterMarkLow() !== -1 && config.getWriteBufferWaterMarkHigh() !== -1) {
+        if (config.writeBufferWaterMarkLow !== -1 && config.writeBufferWaterMarkHigh !== -1) {
             bootstrap.childOption<WriteBufferWaterMark>(
                 ChannelOption.WRITE_BUFFER_WATER_MARK, WriteBufferWaterMark(
-                    config.getWriteBufferWaterMarkLow(), config.getWriteBufferWaterMarkHigh()
+                    config.writeBufferWaterMarkLow, config.writeBufferWaterMarkHigh
                 )
             )
         }
-        bootstrap.childOption(ChannelOption.SO_KEEPALIVE, config.isTcpKeepAlive())
-        bootstrap.childOption(ChannelOption.SO_LINGER, config.getSoLinger())
-        bootstrap.option(ChannelOption.SO_REUSEADDR, config.isReuseAddress())
-        bootstrap.option(ChannelOption.SO_BACKLOG, config.getAcceptBackLog())
+        bootstrap.childOption(ChannelOption.SO_KEEPALIVE, config.isTcpKeepAlive)
+        bootstrap.childOption(ChannelOption.SO_LINGER, config.soLinger)
+        bootstrap.option(ChannelOption.SO_REUSEADDR, config.isReuseAddress)
+        bootstrap.option(ChannelOption.SO_BACKLOG, config.acceptBackLog)
     }
 
     protected fun initGroups() {
-        if (configCopy.isUseLinuxNativeEpoll()) {
-            bossGroup = EpollEventLoopGroup(configCopy.getBossThreads())
-            workerGroup = EpollEventLoopGroup(configCopy.getWorkerThreads())
+        if (configCopy.isUseLinuxNativeEpoll) {
+            bossGroup = EpollEventLoopGroup(configCopy.bossThreads)
+            workerGroup = EpollEventLoopGroup(configCopy.workerThreads)
         } else {
-            bossGroup = NioEventLoopGroup(configCopy.getBossThreads())
-            workerGroup = NioEventLoopGroup(configCopy.getWorkerThreads())
+            bossGroup = NioEventLoopGroup(configCopy.bossThreads)
+            workerGroup = NioEventLoopGroup(configCopy.workerThreads)
         }
     }
 
-    /**
-     * Stop server
-     */
     fun stop() {
-        bossGroup.shutdownGracefully().syncUninterruptibly()
-        workerGroup.shutdownGracefully().syncUninterruptibly()
+        bossGroup!!.shutdownGracefully().syncUninterruptibly()
+        workerGroup!!.shutdownGracefully().syncUninterruptibly()
         pipelineFactory.stop()
         log.info("SocketIO server stopped")
     }
 
-    fun addNamespace(name: String?): SocketIONamespace {
+    fun addNamespace(name: String): SocketIONamespace {
         return namespacesHub.create(name)
     }
 
-    fun getNamespace(name: String?): SocketIONamespace {
-        return namespacesHub.get(name)
+    fun getNamespace(name: String): SocketIONamespace {
+        return namespacesHub[name]
     }
 
     fun removeNamespace(name: String?) {
@@ -201,43 +194,43 @@ class SocketIOServer(configuration: Configuration) : ClientListeners {
         return configuration
     }
 
-    fun addMultiTypeEventListener(eventName: String?, listener: MultiTypeEventListener?, vararg eventClass: Class<*>?) {
-        mainNamespace.addMultiTypeEventListener(eventName, listener, eventClass)
+    override fun addMultiTypeEventListener(eventName: String, listener: MultiTypeEventListener, vararg eventClass: Class<*>) {
+        mainNamespace.addMultiTypeEventListener(eventName, listener, *eventClass)
     }
 
-    fun <T> addEventListener(eventName: String?, eventClass: Class<T>?, listener: DataListener<T>?) {
+    override fun addEventListener(eventName: String, eventClass: Class<*>, listener: DataListener) {
         mainNamespace.addEventListener(eventName, eventClass, listener)
     }
 
-    fun addEventInterceptor(eventInterceptor: EventInterceptor?) {
+    override fun addEventInterceptor(eventInterceptor: EventInterceptor) {
         mainNamespace.addEventInterceptor(eventInterceptor)
     }
 
-    fun removeAllListeners(eventName: String?) {
+    override fun removeAllListeners(eventName: String) {
         mainNamespace.removeAllListeners(eventName)
     }
 
-    fun addDisconnectListener(listener: DisconnectListener?) {
+    override fun addDisconnectListener(listener: DisconnectListener) {
         mainNamespace.addDisconnectListener(listener)
     }
 
-    fun addConnectListener(listener: ConnectListener?) {
+    override fun addConnectListener(listener: ConnectListener) {
         mainNamespace.addConnectListener(listener)
     }
 
-    fun addPingListener(listener: PingListener?) {
+    override fun addPingListener(listener: PingListener) {
         mainNamespace.addPingListener(listener)
     }
 
-    fun addPongListener(listener: PongListener?) {
+    override fun addPongListener(listener: PongListener) {
         mainNamespace.addPongListener(listener)
     }
 
-    fun addListeners(listeners: Any?) {
+    override fun addListeners(listeners: Any) {
         mainNamespace.addListeners(listeners)
     }
 
-    fun addListeners(listeners: Any?, listenersClass: Class<*>?) {
+    override fun addListeners(listeners: Any, listenersClass: Class<*>) {
         mainNamespace.addListeners(listeners, listenersClass)
     }
 

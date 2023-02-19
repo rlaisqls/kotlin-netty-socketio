@@ -1,17 +1,30 @@
 
 package com.gribouille.socketio.ack
 
-import com.gribouille.socketio.*
+import com.gribouille.socketio.AckCallback
+import com.gribouille.socketio.Disconnectable
+import com.gribouille.socketio.MultiTypeAckCallback
+import com.gribouille.socketio.MultiTypeArgs
+import com.gribouille.socketio.SocketIOClient
+import com.gribouille.socketio.handler.ClientHead
+import com.gribouille.socketio.namespace.Namespace
+import com.gribouille.socketio.protocol.Packet
+import com.gribouille.socketio.scheduler.CancelableScheduler
+import com.gribouille.socketio.scheduler.SchedulerKey
+import com.gribouille.socketio.scheduler.SchedulerKey.Type
 import io.netty.util.internal.PlatformDependent
 import org.slf4j.LoggerFactory
-import java.util.*
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentMap
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 class AckManager(scheduler: CancelableScheduler) : Disconnectable {
     internal inner class AckEntry {
-        val ackCallbacks: MutableMap<Long, AckCallback<*>> =
-            PlatformDependent.newConcurrentHashMap<Long, AckCallback<*>>()
+        val ackCallbacks: MutableMap<Long, AckCallback> = ConcurrentHashMap()
         val ackIndex: AtomicLong = AtomicLong(-1)
-        fun addAckCallback(callback: AckCallback<*>): Long {
+        fun addAckCallback(callback: AckCallback): Long {
             val index: Long = ackIndex.incrementAndGet()
             ackCallbacks[index] = callback
             return index
@@ -20,11 +33,11 @@ class AckManager(scheduler: CancelableScheduler) : Disconnectable {
         val ackIndexes: Set<Long>
             get() = ackCallbacks.keys
 
-        fun getAckCallback(index: Long): AckCallback<*> {
+        fun getAckCallback(index: Long): AckCallback? {
             return ackCallbacks[index]
         }
 
-        fun removeCallback(index: Long): AckCallback<*> {
+        fun removeCallback(index: Long): AckCallback? {
             return ackCallbacks.remove(index)
         }
 
@@ -45,55 +58,46 @@ class AckManager(scheduler: CancelableScheduler) : Disconnectable {
         ackEntry.initAckIndex(index)
     }
 
-    private fun getAckEntry(sessionId: UUID): AckEntry {
-        var ackEntry: AckEntry? = ackEntries.get(sessionId)
-        if (ackEntry == null) {
-            ackEntry = AckEntry()
-            val oldAckEntry: AckEntry = ackEntries.putIfAbsent(sessionId, ackEntry)
-            if (oldAckEntry != null) {
-                ackEntry = oldAckEntry
-            }
-        }
-        return ackEntry
-    }
+    private fun getAckEntry(sessionId: UUID) =
+        ackEntries[sessionId] ?: AckEntry().also { ackEntries.putIfAbsent(sessionId, it) }
 
-    fun onAck(client: SocketIOClient, packet: Packet) {
-        val key = AckSchedulerKey(Type.ACK_TIMEOUT, client.getSessionId(), packet.getAckId())
+    fun onAck(
+        client: SocketIOClient,
+        packet: Packet
+    ) {
+        val key = AckSchedulerKey(Type.ACK_TIMEOUT, client.sessionId, packet.ackId!!)
         scheduler.cancel(key)
-        val callback: AckCallback = removeCallback(client.getSessionId(), packet.getAckId()) ?: return
+        val callback = removeCallback(client.sessionId, packet.ackId!!) ?: return
         if (callback is MultiTypeAckCallback) {
-            callback.onSuccess(MultiTypeArgs(packet.< List < Object > > getData<List<Any>>()))
+            callback.onSuccess(MultiTypeArgs(packet.data as List<Any>))
         } else {
             var param: Any? = null
-            val args: List<Any> = packet.getData()
+            val args = packet.data as List<Any>
             if (!args.isEmpty()) {
                 param = args[0]
             }
             if (args.size > 1) {
                 log.error(
                     "Wrong ack args amount. Should be only one argument, but current amount is: {}. Ack id: {}, sessionId: {}",
-                    args.size, packet.getAckId(), client.getSessionId()
+                    args.size, packet.ackId, client.sessionId
                 )
             }
             callback.onSuccess(param)
         }
     }
 
-    private fun removeCallback(sessionId: UUID, index: Long): AckCallback<*>? {
-        val ackEntry: AckEntry = ackEntries.get(sessionId)
+    private fun removeCallback(sessionId: UUID, index: Long): AckCallback? {
         // may be null if client disconnected
         // before timeout occurs
-        return if (ackEntry != null) {
-            ackEntry.removeCallback(index)
-        } else null
+        return ackEntries[sessionId]?.removeCallback(index)
     }
 
-    fun getCallback(sessionId: UUID, index: Long): AckCallback<*> {
+    fun getCallback(sessionId: UUID, index: Long): AckCallback? {
         val ackEntry = getAckEntry(sessionId)
         return ackEntry.getAckCallback(index)
     }
 
-    fun registerAck(sessionId: UUID, callback: AckCallback<*>): Long {
+    fun registerAck(sessionId: UUID, callback: AckCallback): Long {
         val ackEntry = getAckEntry(sessionId)
         ackEntry.initAckIndex(0)
         val index = ackEntry.addAckCallback(callback)
@@ -104,28 +108,22 @@ class AckManager(scheduler: CancelableScheduler) : Disconnectable {
         return index
     }
 
-    private fun scheduleTimeout(index: Long, sessionId: UUID, callback: AckCallback<*>) {
-        if (callback.getTimeout() === -1) {
+    private fun scheduleTimeout(index: Long, sessionId: UUID, callback: AckCallback) {
+        if (callback.timeout == -1) {
             return
         }
         val key: SchedulerKey = AckSchedulerKey(Type.ACK_TIMEOUT, sessionId, index)
         scheduler.scheduleCallback(key, Runnable {
-            val cb: AckCallback<*>? = removeCallback(sessionId, index)
-            if (cb != null) {
-                cb.onTimeout()
-            }
-        }, callback.getTimeout(), TimeUnit.SECONDS)
+            removeCallback(sessionId, index)?.onTimeout()
+        }, callback.timeout, TimeUnit.SECONDS)
     }
 
-    fun onDisconnect(client: ClientHead) {
-        val e: AckEntry = ackEntries.remove(client.getSessionId()) ?: return
+    override fun onDisconnect(client: ClientHead) {
+        val e: AckEntry = ackEntries.remove(client.sessionId) ?: return
         val indexes = e.ackIndexes
         for (index in indexes) {
-            val callback: AckCallback<*> = e.getAckCallback(index)
-            if (callback != null) {
-                callback.onTimeout()
-            }
-            val key: SchedulerKey = AckSchedulerKey(Type.ACK_TIMEOUT, client.getSessionId(), index)
+            e.getAckCallback(index)?.onTimeout()
+            val key: SchedulerKey = AckSchedulerKey(Type.ACK_TIMEOUT, client.sessionId, index)
             scheduler.cancel(key)
         }
     }

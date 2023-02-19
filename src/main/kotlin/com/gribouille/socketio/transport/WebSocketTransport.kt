@@ -36,21 +36,11 @@ import java.util.concurrent.TimeUnit
 
 @Sharable
 class WebSocketTransport(
-    private val isSsl: Boolean,
-    authorizeHandler: AuthorizeHandler, configuration: Configuration,
-    scheduler: CancelableScheduler, clientsBox: ClientsBox
+    val authorizeHandler: AuthorizeHandler,
+    val configuration: Configuration,
+    val scheduler: CancelableScheduler,
+    val clientsBox: ClientsBox
 ) : ChannelInboundHandlerAdapter() {
-    private val authorizeHandler: AuthorizeHandler
-    private val scheduler: CancelableScheduler
-    private val configuration: Configuration
-    private val clientsBox: ClientsBox
-
-    init {
-        this.authorizeHandler = authorizeHandler
-        this.configuration = configuration
-        this.scheduler = scheduler
-        this.clientsBox = clientsBox
-    }
 
     @Throws(Exception::class)
     override fun channelRead(ctx: ChannelHandlerContext, msg: Any) {
@@ -60,7 +50,7 @@ class WebSocketTransport(
             || msg is TextWebSocketFrame
         ) {
             val frame: ByteBufHolder = msg as ByteBufHolder
-            val client: ClientHead? = clientsBox.get(ctx.channel())
+            val client: ClientHead? = clientsBox[ctx.channel()]
             if (client == null) {
                 log.debug("Client with was already disconnected. Channel closed!")
                 ctx.channel().close()
@@ -83,7 +73,7 @@ class WebSocketTransport(
             val sid = queryDecoder.parameters().get("sid")
             if (transport != null && NAME == transport[0]) {
                 try {
-                    if (!configuration.getTransports().contains(Transport.WEBSOCKET)) {
+                    if (!configuration.transports.contains(Transport.WEBSOCKET)) {
                         log.debug(
                             "{} transport not supported by configuration.",
                             Transport.WEBSOCKET
@@ -203,13 +193,8 @@ class WebSocketTransport(
         log.debug("сlient {} handshake completed", sessionId)
     }
 
-    private fun getWebSocketLocation(req: HttpRequest): String {
-        var protocol = "ws://"
-        if (isSsl) {
-            protocol = "wss://"
-        }
-        return protocol + req.headers()[HttpHeaderNames.HOST] + req.uri()
-    }
+    private fun getWebSocketLocation(req: HttpRequest): String =
+        "ws://" + req.headers()[HttpHeaderNames.HOST] + req.uri()
 
     companion object {
         const val NAME = "websocket"

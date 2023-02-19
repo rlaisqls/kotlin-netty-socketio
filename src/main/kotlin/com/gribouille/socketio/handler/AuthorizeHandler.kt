@@ -3,19 +3,46 @@ package com.gribouille.socketio.handler
 
 import com.gribouille.socketio.HandshakeData
 import com.gribouille.socketio.Configuration
+import com.gribouille.socketio.Disconnectable
+import com.gribouille.socketio.DisconnectableHub
+import com.gribouille.socketio.SocketIOClient
+import com.gribouille.socketio.ack.AckManager
+import com.gribouille.socketio.messages.HttpErrorMessage
+import com.gribouille.socketio.namespace.Namespace
+import com.gribouille.socketio.namespace.NamespacesHub
+import com.gribouille.socketio.protocol.AuthPacket
+import com.gribouille.socketio.protocol.Packet
+import com.gribouille.socketio.protocol.PacketType
+import com.gribouille.socketio.scheduler.CancelableScheduler
+import com.gribouille.socketio.scheduler.SchedulerKey
+import com.gribouille.socketio.scheduler.SchedulerKey.Type
+import com.gribouille.socketio.store.StoreFactory
 import io.netty.channel.Channel
+import io.netty.channel.ChannelFutureListener
+import io.netty.channel.ChannelHandler.Sharable
+import io.netty.channel.ChannelHandlerContext
+import io.netty.channel.ChannelInboundHandlerAdapter
+import io.netty.handler.codec.http.DefaultHttpResponse
+import io.netty.handler.codec.http.FullHttpRequest
+import io.netty.handler.codec.http.HttpHeaderNames
 import io.netty.handler.codec.http.HttpHeaders
 import io.netty.handler.codec.http.HttpResponse
+import io.netty.handler.codec.http.HttpResponseStatus
 import io.netty.handler.codec.http.HttpVersion
+import io.netty.handler.codec.http.QueryStringDecoder
 import io.netty.handler.codec.http.cookie.Cookie
+import io.netty.handler.codec.http.cookie.ServerCookieDecoder
 import org.slf4j.LoggerFactory
+import java.io.IOException
+import java.net.InetSocketAddress
 import java.util.*
+import java.util.concurrent.TimeUnit
 
 @Sharable
 class AuthorizeHandler(
     private val connectPath: String,
     scheduler: CancelableScheduler,
-    private val configuration: com.gribouille.socketio.Configuration,
+    private val configuration: Configuration,
     namespacesHub: NamespacesHub,
     storeFactory: StoreFactory,
     disconnectable: DisconnectableHub,
@@ -41,7 +68,7 @@ class AuthorizeHandler(
     @Throws(Exception::class)
     override fun channelActive(ctx: ChannelHandlerContext) {
         val key = SchedulerKey(Type.PING_TIMEOUT, ctx.channel())
-        scheduler.schedule(key, Runnable {
+        scheduler.schedule(key, {
             ctx.channel().close()
             log.debug(
                 "Client with ip {} opened channel but doesn't send any data! Channel closed!",
@@ -56,7 +83,7 @@ class AuthorizeHandler(
         val key = SchedulerKey(Type.PING_TIMEOUT, ctx.channel())
         scheduler.cancel(key)
         if (msg is FullHttpRequest) {
-            val req: FullHttpRequest = msg as FullHttpRequest
+            val req = msg as FullHttpRequest
             val channel: Channel = ctx.channel()
             val queryDecoder = QueryStringDecoder(req.uri())
             if (!configuration.isAllowCustomRequests
@@ -67,9 +94,9 @@ class AuthorizeHandler(
                 req.release()
                 return
             }
-            val sid: List<String> = queryDecoder.parameters().get("sid")
+            val sid: MutableList<String>? = queryDecoder.parameters()["sid"]
             if (queryDecoder.path() == connectPath && sid == null) {
-                val origin: String = req.headers().get(HttpHeaderNames.ORIGIN)
+                val origin = req.headers().get(HttpHeaderNames.ORIGIN)
                 if (!authorize(ctx, channel, origin, queryDecoder.parameters(), req)) {
                     req.release()
                     return
@@ -138,28 +165,28 @@ class AuthorizeHandler(
             return false
         }
         val client = ClientHead(
-            sessionId,
-            ackManager,
-            disconnectable,
-            storeFactory,
-            data,
-            clientsBox,
-            transport,
-            scheduler,
-            configuration
+            sessionId = sessionId,
+            ackManager = ackManager,
+            disconnectableHub = disconnectable,
+            storeFactory = storeFactory,
+            handshakeData = data,
+            clientsBox = clientsBox,
+            currentTransport = transport!!,
+            scheduler = scheduler,
+            configuration = configuration
         )
         channel.attr<ClientHead>(ClientHead.Companion.CLIENT).set(client)
         clientsBox.addClient(client)
-        var transports = arrayOf<String?>()
+        var transports = arrayOf<String>()
         if (configuration.transports.contains(com.gribouille.socketio.Transport.WEBSOCKET)) {
             transports = arrayOf("websocket")
         }
         val authPacket = AuthPacket(
-            sessionId, transports, configuration.pingInterval,
+            sessionId!!, transports!!, configuration.pingInterval,
             configuration.pingTimeout
         )
         val packet = Packet(PacketType.OPEN)
-        packet.setData(authPacket)
+        packet.data = authPacket
         client.send(packet)
         client.schedulePing()
         client.schedulePingTimeout()
@@ -213,15 +240,14 @@ class AuthorizeHandler(
         val ns: Namespace = namespacesHub.get(Namespace.DEFAULT_NAME)
         if (!client.namespaces.contains(ns)) {
             val packet = Packet(PacketType.MESSAGE)
-            packet.setSubType(PacketType.CONNECT)
+            packet.subType = PacketType.CONNECT
             client.send(packet)
-            configuration.storeFactory.pubSubStore().publish(PubSubType.CONNECT, ConnectMessage(client.sessionId))
-            val nsClient: SocketIOClient? = client.addNamespaceClient(ns)
+            val nsClient = client.addNamespaceClient(ns)
             ns.onConnect(nsClient)
         }
     }
 
-    fun onDisconnect(client: ClientHead) {
+    override fun onDisconnect(client: ClientHead) {
         clientsBox.removeClient(client.sessionId)
     }
 

@@ -3,23 +3,57 @@ package com.gribouille.socketio.handler
 
 import com.gribouille.socketio.messages.HttpErrorMessage
 import com.gribouille.socketio.Configuration
+import com.gribouille.socketio.messages.HttpMessage
+import com.gribouille.socketio.messages.OutPacketMessage
+import com.gribouille.socketio.messages.XHROptionsMessage
+import com.gribouille.socketio.messages.XHRPostMessage
+import com.gribouille.socketio.protocol.PacketEncoder
+import io.netty.buffer.ByteBuf
+import io.netty.buffer.ByteBufOutputStream
+import io.netty.buffer.ByteBufUtil
 import io.netty.channel.Channel
+import io.netty.channel.ChannelFuture
+import io.netty.channel.ChannelFutureListener
+import io.netty.channel.ChannelHandler.Sharable
+import io.netty.channel.ChannelHandlerContext
+import io.netty.channel.ChannelOutboundHandlerAdapter
+import io.netty.channel.ChannelPromise
+import io.netty.handler.codec.http.DefaultHttpContent
+import io.netty.handler.codec.http.DefaultHttpResponse
+import io.netty.handler.codec.http.HttpHeaderNames
+import io.netty.handler.codec.http.HttpHeaderValues
 import io.netty.handler.codec.http.HttpResponse
+import io.netty.handler.codec.http.HttpResponseStatus
 import io.netty.handler.codec.http.HttpUtil
 import io.netty.handler.codec.http.HttpVersion
+import io.netty.handler.codec.http.LastHttpContent
+import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame
+import io.netty.handler.codec.http.websocketx.ContinuationWebSocketFrame
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame
+import io.netty.handler.codec.http.websocketx.WebSocketFrame
 import io.netty.util.AttributeKey
 import io.netty.util.CharsetUtil
 import io.netty.util.concurrent.Future
+import io.netty.util.concurrent.GenericFutureListener
 import org.slf4j.LoggerFactory
+import java.io.IOException
 import java.net.URL
 import java.util.*
 import java.util.jar.Manifest
 
 @Sharable
-class EncoderHandler(configuration: com.gribouille.socketio.Configuration, encoder: PacketEncoder) : ChannelOutboundHandlerAdapter() {
-    private val encoder: PacketEncoder
+class EncoderHandler(
+    val configuration: Configuration,
+    val encoder: PacketEncoder
+) : ChannelOutboundHandlerAdapter() {
     private var version: String? = null
-    private val configuration: com.gribouille.socketio.Configuration
+
+    init {
+        if (configuration.isAddVersionHeader) {
+            readVersion()
+        }
+    }
+
     @Throws(IOException::class)
     private fun readVersion() {
         val resources: Enumeration<URL> = javaClass.classLoader.getResources("META-INF/MANIFEST.MF")
@@ -32,25 +66,23 @@ class EncoderHandler(configuration: com.gribouille.socketio.Configuration, encod
                     version = name + "/" + attrs.getValue("Bundle-Version")
                     break
                 }
-            } catch (E: IOException) {
-                // skip it
-            }
+            } catch (_: IOException) { }
         }
     }
 
     private fun write(msg: XHROptionsMessage, ctx: ChannelHandlerContext, promise: ChannelPromise) {
         val res: HttpResponse = DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK)
-        res.headers().add(HttpHeaderNames.SET_COOKIE, "io=" + msg.getSessionId())
+        res.headers().add(HttpHeaderNames.SET_COOKIE, "io=" + msg.sessionId)
             .add(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE)
             .add(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, HttpHeaderNames.CONTENT_TYPE)
         val origin: String = ctx.channel().attr<String>(ORIGIN).get()
         addOriginHeaders(origin, res)
-        val out: ByteBuf = encoder.allocateBuffer(ctx.alloc())
+        val out = encoder.allocateBuffer(ctx.alloc())
         sendMessage(msg, ctx.channel(), out, res, promise)
     }
 
     private fun write(msg: XHRPostMessage, ctx: ChannelHandlerContext, promise: ChannelPromise) {
-        val out: ByteBuf = encoder.allocateBuffer(ctx.alloc())
+        val out = encoder.allocateBuffer(ctx.alloc())
         out.writeBytes(OK)
         sendMessage(msg, ctx.channel(), out, "text/html", promise, HttpResponseStatus.OK)
     }
@@ -66,8 +98,8 @@ class EncoderHandler(configuration: com.gribouille.socketio.Configuration, encod
         val res: HttpResponse = DefaultHttpResponse(HttpVersion.HTTP_1_1, status)
         res.headers().add(HttpHeaderNames.CONTENT_TYPE, type)
             .add(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE)
-        if (msg.getSessionId() != null) {
-            res.headers().add(HttpHeaderNames.SET_COOKIE, "io=" + msg.getSessionId())
+        if (msg.sessionId != null) {
+            res.headers().add(HttpHeaderNames.SET_COOKIE, "io=" + msg.sessionId)
         }
         val origin = channel.attr(ORIGIN).get()
         addOriginHeaders(origin, res)
@@ -91,8 +123,8 @@ class EncoderHandler(configuration: com.gribouille.socketio.Configuration, encod
     ) {
         channel.write(res)
         if (log.isTraceEnabled) {
-            if (msg.getSessionId() != null) {
-                log.trace("Out message: {} - sessionId: {}", out.toString(CharsetUtil.UTF_8), msg.getSessionId())
+            if (msg.sessionId != null) {
+                log.trace("Out message: {} - sessionId: {}", out.toString(CharsetUtil.UTF_8), msg.sessionId)
             } else {
                 log.trace("Out message: {}", out.toString(CharsetUtil.UTF_8))
             }
@@ -109,7 +141,7 @@ class EncoderHandler(configuration: com.gribouille.socketio.Configuration, encod
     private fun sendError(errorMsg: HttpErrorMessage, ctx: ChannelHandlerContext, promise: ChannelPromise) {
         val encBuf: ByteBuf = encoder.allocateBuffer(ctx.alloc())
         val out = ByteBufOutputStream(encBuf)
-        encoder.getJsonSupport().writeValue(out, errorMsg.getData())
+        encoder.jsonSupport.writeValue(out, errorMsg.data)
         sendMessage(errorMsg, ctx.channel(), encBuf, "application/json", promise, HttpResponseStatus.BAD_REQUEST)
     }
 
@@ -140,27 +172,18 @@ class EncoderHandler(configuration: com.gribouille.socketio.Configuration, encod
             return
         }
         if (msg is OutPacketMessage) {
-            val m: OutPacketMessage = msg as OutPacketMessage
-            if (m.getTransport() === com.gribouille.socketio.Transport.WEBSOCKET) {
-                handleWebsocket(msg as OutPacketMessage, ctx, promise)
+            if (msg.transport === com.gribouille.socketio.Transport.WEBSOCKET) {
+                handleWebsocket(msg, ctx, promise)
             }
-            if (m.getTransport() === com.gribouille.socketio.Transport.POLLING) {
-                handleHTTP(msg as OutPacketMessage, ctx, promise)
+            if (msg.transport === com.gribouille.socketio.Transport.POLLING) {
+                handleHTTP(msg, ctx, promise)
             }
         } else if (msg is XHROptionsMessage) {
-            write(msg as XHROptionsMessage, ctx, promise)
+            write(msg, ctx, promise)
         } else if (msg is XHRPostMessage) {
-            write(msg as XHRPostMessage, ctx, promise)
+            write(msg, ctx, promise)
         } else if (msg is HttpErrorMessage) {
-            sendError(msg as HttpErrorMessage, ctx, promise)
-        }
-    }
-
-    init {
-        this.encoder = encoder
-        this.configuration = configuration
-        if (configuration.isAddVersionHeader) {
-            readVersion()
+            sendError(msg, ctx, promise)
         }
     }
 
@@ -168,8 +191,8 @@ class EncoderHandler(configuration: com.gribouille.socketio.Configuration, encod
     private fun handleWebsocket(msg: OutPacketMessage, ctx: ChannelHandlerContext, promise: ChannelPromise) {
         val writeFutureList = ChannelFutureList()
         while (true) {
-            val queue: Queue<Packet> = msg.getClientHead().getPacketsQueue(msg.getTransport())
-            val packet: Packet? = queue.poll()
+            val queue = msg.clientHead.getPacketsQueue(msg.transport)!!
+            val packet = queue.poll()
             if (packet == null) {
                 writeFutureList.setChannelPromise(promise)
                 break
@@ -177,7 +200,7 @@ class EncoderHandler(configuration: com.gribouille.socketio.Configuration, encod
             val out: ByteBuf = encoder.allocateBuffer(ctx.alloc())
             encoder.encodePacket(packet, out, ctx.alloc(), true)
             if (log.isTraceEnabled) {
-                log.trace("Out message: {} sessionId: {}", out.toString(CharsetUtil.UTF_8), msg.getSessionId())
+                log.trace("Out message: {} sessionId: {}", out.toString(CharsetUtil.UTF_8), msg.sessionId)
             }
             if (out.isReadable() && out.readableBytes() > configuration.maxFramePayloadLength) {
                 val dstStart: ByteBuf = ByteBufUtil.readBytes(ctx.alloc(), out, FRAME_BUFFER_SIZE)
@@ -196,12 +219,12 @@ class EncoderHandler(configuration: com.gribouille.socketio.Configuration, encod
             } else {
                 out.release()
             }
-            for (buf in packet.getAttachments()) {
+            for (buf in packet.attachments) {
                 val outBuf: ByteBuf = encoder.allocateBuffer(ctx.alloc())
                 outBuf.writeByte(4)
                 outBuf.writeBytes(buf)
                 if (log.isTraceEnabled) {
-                    log.trace("Out attachment: {} sessionId: {}", ByteBufUtil.hexDump(outBuf), msg.getSessionId())
+                    log.trace("Out attachment: {} sessionId: {}", ByteBufUtil.hexDump(outBuf), msg.sessionId)
                 }
                 writeFutureList.add(ctx.channel().writeAndFlush(BinaryWebSocketFrame(outBuf)))
             }
@@ -212,23 +235,23 @@ class EncoderHandler(configuration: com.gribouille.socketio.Configuration, encod
     private fun handleHTTP(msg: OutPacketMessage, ctx: ChannelHandlerContext, promise: ChannelPromise) {
         val channel: Channel = ctx.channel()
         val attr = channel.attr(WRITE_ONCE)
-        val queue: Queue<Packet> = msg.getClientHead().getPacketsQueue(msg.getTransport())
-        if (!channel.isActive || queue.isEmpty() || !attr.compareAndSet(null, true)) {
+        val queue = msg.clientHead.getPacketsQueue(msg.transport)
+        if (!channel.isActive || queue?.isEmpty() == true || !attr.compareAndSet(null, true)) {
             promise.trySuccess()
             return
         }
-        val out: ByteBuf = encoder.allocateBuffer(ctx.alloc())
-        val b64: Boolean = ctx.channel().attr<Boolean>(B64).get()
+        val out = encoder.allocateBuffer(ctx.alloc())
+        val b64 = ctx.channel().attr(B64).get()
         if (b64 != null && b64) {
-            val jsonpIndex: Int = ctx.channel().attr<Int>(JSONP_INDEX).get()
-            encoder.encodeJsonP(jsonpIndex, queue, out, ctx.alloc(), 50)
+            val jsonpIndex = ctx.channel().attr(JSONP_INDEX).get()
+            encoder.encodeJsonP(jsonpIndex, queue!!, out, ctx.alloc(), 50)
             var type = "application/javascript"
             if (jsonpIndex == null) {
                 type = "text/plain"
             }
             sendMessage(msg, channel, out, type, promise, HttpResponseStatus.OK)
         } else {
-            encoder.encodePackets(queue, out, ctx.alloc(), 50)
+            encoder.encodePackets(queue!!, out, ctx.alloc(), 50)
             sendMessage(msg, channel, out, "application/octet-stream", promise, HttpResponseStatus.OK)
         }
     }
@@ -240,7 +263,7 @@ class EncoderHandler(configuration: com.gribouille.socketio.Configuration, encod
      * - all of the operations succeed
      * The setChannelPromise method should be called after all the futures are added
      */
-    private inner class ChannelFutureList : GenericFutureListener<Future<Void?>?> {
+    private inner class ChannelFutureList : GenericFutureListener<Future<Void>> {
         private val futureList: MutableList<ChannelFuture> = ArrayList<ChannelFuture>()
         private var promise: ChannelPromise? = null
         private fun cleanup() {
@@ -251,9 +274,9 @@ class EncoderHandler(configuration: com.gribouille.socketio.Configuration, encod
         private fun validate() {
             var allSuccess = true
             for (f in futureList) {
-                if (f.isDone()) {
-                    if (!f.isSuccess()) {
-                        promise.tryFailure(f.cause())
+                if (f.isDone) {
+                    if (!f.isSuccess) {
+                        promise!!.tryFailure(f.cause())
                         cleanup()
                         return
                     }
@@ -262,7 +285,7 @@ class EncoderHandler(configuration: com.gribouille.socketio.Configuration, encod
                 }
             }
             if (allSuccess) {
-                promise.trySuccess()
+                promise!!.trySuccess()
                 cleanup()
             }
         }
@@ -278,7 +301,7 @@ class EncoderHandler(configuration: com.gribouille.socketio.Configuration, encod
         }
 
         @Throws(Exception::class)
-        override fun operationComplete(voidFuture: Future<Void?>) {
+        override fun operationComplete(voidFuture: Future<Void>) {
             if (promise != null) validate()
         }
     }

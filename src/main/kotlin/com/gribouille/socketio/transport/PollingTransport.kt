@@ -1,44 +1,60 @@
-
 package com.gribouille.socketio.transport
 
+import com.gribouille.socketio.Transport
 import com.gribouille.socketio.handler.AuthorizeHandler
+import com.gribouille.socketio.handler.ClientHead
+import com.gribouille.socketio.handler.ClientsBox
+import com.gribouille.socketio.handler.EncoderHandler
+import com.gribouille.socketio.messages.PacketsMessage
+import com.gribouille.socketio.messages.XHROptionsMessage
+import com.gribouille.socketio.messages.XHRPostMessage
+import com.gribouille.socketio.protocol.PacketDecoder
+import io.netty.buffer.ByteBuf
 import io.netty.channel.Channel
+import io.netty.channel.ChannelFutureListener
+import io.netty.channel.ChannelHandler
+import io.netty.channel.ChannelHandler.Sharable
+import io.netty.channel.ChannelHandlerContext
+import io.netty.channel.ChannelInboundHandlerAdapter
+import io.netty.handler.codec.http.DefaultHttpResponse
+import io.netty.handler.codec.http.FullHttpRequest
+import io.netty.handler.codec.http.HttpHeaderNames
 import io.netty.handler.codec.http.HttpMethod
 import io.netty.handler.codec.http.HttpResponse
+import io.netty.handler.codec.http.HttpResponseStatus
 import io.netty.handler.codec.http.HttpVersion
+import io.netty.handler.codec.http.QueryStringDecoder
 import org.slf4j.LoggerFactory
+import java.io.IOException
 import java.util.*
 
 @Sharable
-class PollingTransport(decoder: PacketDecoder, authorizeHandler: AuthorizeHandler, clientsBox: ClientsBox) :
-    ChannelInboundHandlerAdapter() {
-    private val decoder: PacketDecoder
+class PollingTransport(
+    private val decoder: PacketDecoder,
+    private val authorizeHandler: AuthorizeHandler,
     private val clientsBox: ClientsBox
-    private val authorizeHandler: AuthorizeHandler
-
-    init {
-        this.decoder = decoder
-        this.authorizeHandler = authorizeHandler
-        this.clientsBox = clientsBox
-    }
+) : ChannelInboundHandlerAdapter() {
 
     @Throws(Exception::class)
-    override fun channelRead(ctx: ChannelHandlerContext, msg: Any) {
+    override fun channelRead(
+        ctx: ChannelHandlerContext,
+        msg: Any
+    ) {
         if (msg is FullHttpRequest) {
-            val req: FullHttpRequest = msg as FullHttpRequest
+            val req = msg as FullHttpRequest
             val queryDecoder = QueryStringDecoder(req.uri())
-            val transport: List<String> = queryDecoder.parameters().get("transport")
+            val transport = queryDecoder.parameters().get("transport")
             if (transport != null && NAME == transport[0]) {
-                val sid: List<String?> = queryDecoder.parameters().get("sid")
-                val j: List<String?> = queryDecoder.parameters().get("j")
-                val b64: List<String?> = queryDecoder.parameters().get("b64")
+                val sid = queryDecoder.parameters().get("sid")
+                val j = queryDecoder.parameters().get("j")
+                val b64 = queryDecoder.parameters().get("b64")
                 val origin: String = req.headers().get(HttpHeaderNames.ORIGIN)
-                ctx.channel().attr<Any>(EncoderHandler.ORIGIN).set(origin)
+                ctx.channel().attr(EncoderHandler.ORIGIN).set(origin)
                 val userAgent: String = req.headers().get(HttpHeaderNames.USER_AGENT)
-                ctx.channel().attr<Any>(EncoderHandler.USER_AGENT).set(userAgent)
+                ctx.channel().attr(EncoderHandler.USER_AGENT).set(userAgent)
                 if (j != null && j[0] != null) {
                     val index = Integer.valueOf(j[0])
-                    ctx.channel().attr<Any>(EncoderHandler.JSONP_INDEX).set(index)
+                    ctx.channel().attr(EncoderHandler.JSONP_INDEX).set(index)
                 }
                 if (b64 != null && b64[0] != null) {
                     var flag = b64[0]
@@ -48,7 +64,7 @@ class PollingTransport(decoder: PacketDecoder, authorizeHandler: AuthorizeHandle
                         flag = "0"
                     }
                     val enable = Integer.valueOf(flag)
-                    ctx.channel().attr<Any>(EncoderHandler.B64).set(enable == 1)
+                    ctx.channel().attr(EncoderHandler.B64).set(enable == 1)
                 }
                 try {
                     if (sid != null && sid[0] != null) {
@@ -56,8 +72,8 @@ class PollingTransport(decoder: PacketDecoder, authorizeHandler: AuthorizeHandle
                         handleMessage(req, sessionId, queryDecoder, ctx)
                     } else {
                         // first connection
-                        val client: ClientHead = ctx.channel().attr<Any>(ClientHead.CLIENT).get()
-                        handleMessage(req, client.getSessionId(), queryDecoder, ctx)
+                        val client = ctx.channel().attr(ClientHead.CLIENT).get()
+                        handleMessage(req, client.sessionId!!, queryDecoder, ctx)
                     }
                 } finally {
                     req.release()
@@ -77,7 +93,7 @@ class PollingTransport(decoder: PacketDecoder, authorizeHandler: AuthorizeHandle
     ) {
         val origin: String = req.headers().get(HttpHeaderNames.ORIGIN)
         if (queryDecoder.parameters().containsKey("disconnect")) {
-            val client: ClientHead = clientsBox.get(sessionId)
+            val client = clientsBox.get(sessionId)!!
             client.onChannelDisconnect()
             ctx.channel().writeAndFlush(XHRPostMessage(origin, sessionId))
         } else if (HttpMethod.POST == req.method()) {
@@ -93,7 +109,7 @@ class PollingTransport(decoder: PacketDecoder, authorizeHandler: AuthorizeHandle
     }
 
     private fun onOptions(sessionId: UUID, ctx: ChannelHandlerContext, origin: String) {
-        val client: ClientHead = clientsBox.get(sessionId)
+        val client: ClientHead? = clientsBox.get(sessionId)
         if (client == null) {
             log.error("{} is not registered. Closing connection", sessionId)
             sendError(ctx)
@@ -104,8 +120,8 @@ class PollingTransport(decoder: PacketDecoder, authorizeHandler: AuthorizeHandle
 
     @Throws(IOException::class)
     private fun onPost(sessionId: UUID, ctx: ChannelHandlerContext, origin: String, content: ByteBuf) {
-        var content: ByteBuf? = content
-        val client: ClientHead = clientsBox.get(sessionId)
+        var content: ByteBuf = content
+        val client: ClientHead? = clientsBox.get(sessionId)
         if (client == null) {
             log.error("{} is not registered. Closing connection", sessionId)
             sendError(ctx)
@@ -115,16 +131,22 @@ class PollingTransport(decoder: PacketDecoder, authorizeHandler: AuthorizeHandle
 
         // release POST response before message processing
         ctx.channel().writeAndFlush(XHRPostMessage(origin, sessionId))
-        val b64: Boolean = ctx.channel().attr<Any>(EncoderHandler.B64).get()
+        val b64 = ctx.channel().attr(EncoderHandler.B64).get()
         if (b64 != null && b64) {
-            val jsonIndex: Int = ctx.channel().attr<Any>(EncoderHandler.JSONP_INDEX).get()
+            val jsonIndex: Int = ctx.channel().attr(EncoderHandler.JSONP_INDEX).get()
             content = decoder.preprocessJson(jsonIndex, content)
         }
-        ctx.pipeline().fireChannelRead(PacketsMessage(client, content, com.gribouille.socketio.Transport.POLLING))
+        ctx.pipeline().fireChannelRead(
+            PacketsMessage(
+                client = client,
+                content = content,
+                transport = Transport.POLLING
+            )
+        )
     }
 
     protected fun onGet(sessionId: UUID?, ctx: ChannelHandlerContext, origin: String?) {
-        val client: ClientHead = clientsBox.get(sessionId)
+        val client: ClientHead? = clientsBox.get(sessionId)
         if (client == null) {
             log.error("{} is not registered. Closing connection", sessionId)
             sendError(ctx)
@@ -142,9 +164,9 @@ class PollingTransport(decoder: PacketDecoder, authorizeHandler: AuthorizeHandle
     @Throws(Exception::class)
     override fun channelInactive(ctx: ChannelHandlerContext) {
         val channel: Channel = ctx.channel()
-        val client: ClientHead = clientsBox.get(channel)
+        val client: ClientHead? = clientsBox.get(channel)
         if (client != null && client.isTransportChannel(ctx.channel(), com.gribouille.socketio.Transport.POLLING)) {
-            log.debug("channel inactive {}", client.getSessionId())
+            log.debug("channel inactive {}", client.sessionId)
             client.releasePollingChannel(channel)
         }
         super.channelInactive(ctx)

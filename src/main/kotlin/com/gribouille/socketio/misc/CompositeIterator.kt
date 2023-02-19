@@ -1,8 +1,10 @@
 
 package com.gribouille.socketio.misc
 
-class CompositeIterator<T>(private val listIterator: Iterator<Iterator<T>>) : MutableIterator<T> {
-    private var currentIterator: Iterator<T>? = null
+class CompositeIterator<T>(
+    private val listIterator: Iterator<MutableIterator<T>>
+) : MutableIterator<T> {
+    private var currentIterator: MutableIterator<T>? = null
     override fun hasNext(): Boolean {
         if (currentIterator == null || !currentIterator!!.hasNext()) {
             while (listIterator.hasNext()) {
@@ -23,6 +25,6 @@ class CompositeIterator<T>(private val listIterator: Iterator<Iterator<T>>) : Mu
     }
 
     override fun remove() {
-        currentIterator.remove()
+        currentIterator!!.remove()
     }
 }

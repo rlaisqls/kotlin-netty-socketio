@@ -3,55 +3,58 @@ package com.gribouille.socketio.handler
 
 import com.gribouille.socketio.HandshakeData
 import com.gribouille.socketio.Configuration
+import com.gribouille.socketio.DisconnectableHub
+import com.gribouille.socketio.Transport
+import com.gribouille.socketio.ack.AckManager
+import com.gribouille.socketio.messages.OutPacketMessage
+import com.gribouille.socketio.namespace.Namespace
+import com.gribouille.socketio.protocol.Packet
+import com.gribouille.socketio.protocol.PacketType
+import com.gribouille.socketio.scheduler.CancelableScheduler
+import com.gribouille.socketio.scheduler.SchedulerKey
+import com.gribouille.socketio.scheduler.SchedulerKey.Type
+import com.gribouille.socketio.store.Store
+import com.gribouille.socketio.store.StoreFactory
+import com.gribouille.socketio.transport.NamespaceClient
 import io.netty.channel.Channel
+import io.netty.channel.ChannelFuture
+import io.netty.channel.ChannelFutureListener
+import io.netty.handler.codec.http.HttpHeaderNames
 import io.netty.util.AttributeKey
-import io.netty.util.internal.PlatformDependent
 import org.slf4j.LoggerFactory
+import java.net.SocketAddress
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class ClientHead(
+    @Volatile
+    private var currentTransport: Transport,
+    private val scheduler: CancelableScheduler,
+    private val configuration: Configuration,
+    private val clientsBox: ClientsBox,
+    private val disconnectableHub: DisconnectableHub,
     val sessionId: UUID?,
-    ackManager: AckManager,
-    disconnectable: DisconnectableHub,
+    val ackManager: AckManager,
+    val handshakeData: HandshakeData,
     storeFactory: StoreFactory,
-    handshakeData: HandshakeData,
-    clientsBox: ClientsBox,
-    transport: com.gribouille.socketio.Transport,
-    scheduler: CancelableScheduler,
-    configuration: com.gribouille.socketio.Configuration
 ) {
     private val disconnected: AtomicBoolean = AtomicBoolean()
-    private val namespaceClients: MutableMap<Namespace?, NamespaceClient> =
-        PlatformDependent.newConcurrentHashMap<Namespace?, NamespaceClient>()
-    private val channels: MutableMap<com.gribouille.socketio.Transport, TransportState> =
-        HashMap<com.gribouille.socketio.Transport, TransportState>(2)
-    private val handshakeData: HandshakeData
-    private val store: Store
-    private val disconnectableHub: DisconnectableHub
-    private val ackManager: AckManager
-    private val clientsBox: ClientsBox
-    private val scheduler: CancelableScheduler
-    private val configuration: com.gribouille.socketio.Configuration
-    var lastBinaryPacket: Packet? = null
+    private val namespaceClients: MutableMap<Namespace?, NamespaceClient> = ConcurrentHashMap()
+    private val channels: MutableMap<Transport, TransportState> = HashMap(2)
 
-    // TODO use lazy set
-    @Volatile
-    private var currentTransport: com.gribouille.socketio.Transport
+    val store: Store = storeFactory.createStore(sessionId)!!
+    var lastBinaryPacket: Packet? = null
+    val origin: String?
+        get() = handshakeData.httpHeaders.get(HttpHeaderNames.ORIGIN)
 
     init {
-        this.ackManager = ackManager
-        disconnectableHub = disconnectable
-        store = storeFactory.createStore(sessionId)
-        this.handshakeData = handshakeData
-        this.clientsBox = clientsBox
-        currentTransport = transport
-        this.scheduler = scheduler
-        this.configuration = configuration
-        channels[com.gribouille.socketio.Transport.POLLING] = TransportState()
-        channels[com.gribouille.socketio.Transport.WEBSOCKET] = TransportState()
+        channels[Transport.POLLING] = TransportState()
+        channels[Transport.WEBSOCKET] = TransportState()
     }
 
-    fun bindChannel(channel: Channel?, transport: com.gribouille.socketio.Transport) {
+    fun bindChannel(channel: Channel?, transport: Transport) {
         log.debug("binding channel: {} to transport: {}", channel, transport)
         val state = channels[transport]
         val prevChannel = state!!.update(channel)
@@ -63,15 +66,12 @@ class ClientHead(
     }
 
     fun releasePollingChannel(channel: Channel) {
-        val state = channels[com.gribouille.socketio.Transport.POLLING]
-        if (channel == state.getChannel()) {
+        val state = channels[Transport.POLLING]!!
+        if (channel == state.channel) {
             clientsBox.remove(channel)
             state!!.update(null)
         }
     }
-
-    val origin: String
-        get() = handshakeData.getHttpHeaders().get(HttpHeaderNames.ORIGIN)
 
     fun send(packet: Packet?): ChannelFuture? {
         return send(packet, getCurrentTransport())
@@ -90,7 +90,7 @@ class ClientHead(
     fun schedulePing() {
         cancelPing()
         val key = SchedulerKey(Type.PING, sessionId)
-        scheduler.schedule(key, Runnable {
+        scheduler.schedule(key, {
             val client = clientsBox[sessionId]
             if (client != null) {
                 client.send(Packet(PacketType.PING))
@@ -102,7 +102,7 @@ class ClientHead(
     fun schedulePingTimeout() {
         cancelPingTimeout()
         val key = SchedulerKey(Type.PING_TIMEOUT, sessionId)
-        scheduler.schedule(key, Runnable {
+        scheduler.schedule(key, {
             val client = clientsBox[sessionId]
             if (client != null) {
                 client.disconnect()
@@ -111,34 +111,34 @@ class ClientHead(
         }, configuration.pingTimeout + configuration.pingInterval, TimeUnit.MILLISECONDS)
     }
 
-    fun send(packet: Packet?, transport: com.gribouille.socketio.Transport): ChannelFuture? {
-        val state = channels[transport]
-        state.getPacketsQueue().add(packet)
-        val channel = state.getChannel()
-        return if (channel == null || transport == com.gribouille.socketio.Transport.POLLING && channel.attr<Boolean?>(
-                EncoderHandler.Companion.WRITE_ONCE
+    fun send(packet: Packet?, transport: Transport): ChannelFuture? {
+        val state = channels[transport]!!
+        state.packetsQueue!!.add(packet)
+        val channel = state.channel
+        return if (channel == null || transport == Transport.POLLING && channel.attr(
+                EncoderHandler.WRITE_ONCE
             ).get() != null
         ) {
             null
         } else sendPackets(transport, channel)
     }
 
-    private fun sendPackets(transport: com.gribouille.socketio.Transport, channel: Channel?): ChannelFuture {
+    private fun sendPackets(transport: Transport, channel: Channel?): ChannelFuture {
         return channel!!.writeAndFlush(OutPacketMessage(this, transport))
     }
 
     fun removeNamespaceClient(client: NamespaceClient) {
-        namespaceClients.remove(client.getNamespace())
+        namespaceClients.remove(client.namespace)
         if (namespaceClients.isEmpty()) {
             disconnectableHub.onDisconnect(this)
         }
     }
 
-    fun getChildClient(namespace: Namespace?): NamespaceClient? {
+    fun getChildClient(namespace: Namespace): NamespaceClient? {
         return namespaceClients[namespace]
     }
 
-    fun addNamespaceClient(namespace: Namespace?): NamespaceClient {
+    fun addNamespaceClient(namespace: Namespace): NamespaceClient {
         val client = NamespaceClient(this, namespace)
         namespaceClients[namespace] = client
         return client
@@ -163,55 +163,38 @@ class ClientHead(
         }
     }
 
-    fun getHandshakeData(): HandshakeData {
-        return handshakeData
-    }
-
-    fun getAckManager(): AckManager {
-        return ackManager
-    }
-
     val remoteAddress: SocketAddress
-        get() = handshakeData.getAddress()
+        get() = handshakeData.address!!
 
     fun disconnect() {
-        val future: ChannelFuture? = send(Packet(PacketType.DISCONNECT))
-        if (future != null) {
-            future.addListener(ChannelFutureListener.CLOSE)
-        }
+        send(Packet(PacketType.DISCONNECT))?.addListener(ChannelFutureListener.CLOSE)
         onChannelDisconnect()
     }
 
     val isChannelOpen: Boolean
         get() {
             for (state in channels.values) {
-                if (state.channel != null
-                    && state.channel.isActive
-                ) {
+                if (state.channel != null && state.channel!!.isActive) {
                     return true
                 }
             }
             return false
         }
 
-    fun getStore(): Store {
-        return store
-    }
-
-    fun isTransportChannel(channel: Channel, transport: com.gribouille.socketio.Transport): Boolean {
+    fun isTransportChannel(channel: Channel, transport: Transport): Boolean {
         val state = channels[transport]
-        return if (state.getChannel() == null) {
+        return if (state?.channel == null) {
             false
-        } else state.getChannel() == channel
+        } else state.channel == channel
     }
 
-    fun upgradeCurrentTransport(currentTransport: com.gribouille.socketio.Transport) {
-        val state = channels[currentTransport]
+    fun upgradeCurrentTransport(currentTransport: Transport) {
+        val state = channels[currentTransport]!!
         for ((key, value) in channels) {
             if (key != currentTransport) {
-                val queue: Queue<Packet?> = value.packetsQueue
-                state.setPacketsQueue(queue)
-                sendPackets(currentTransport, state.getChannel())
+                val queue = value.packetsQueue
+                state.packetsQueue = queue
+                sendPackets(currentTransport, state.channel)
                 this.currentTransport = currentTransport
                 log.debug("Transport upgraded to: {} for: {}", currentTransport, sessionId)
                 break
@@ -219,12 +202,12 @@ class ClientHead(
         }
     }
 
-    fun getCurrentTransport(): com.gribouille.socketio.Transport {
+    fun getCurrentTransport(): Transport {
         return currentTransport
     }
 
-    fun getPacketsQueue(transport: com.gribouille.socketio.Transport): Queue<Packet?>? {
-        return channels[transport].getPacketsQueue()
+    fun getPacketsQueue(transport: Transport): Queue<Packet?>? {
+        return channels[transport]!!.packetsQueue
     }
 
     companion object {

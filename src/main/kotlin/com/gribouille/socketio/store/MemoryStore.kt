@@ -2,6 +2,7 @@
 package com.gribouille.socketio.store
 
 import io.netty.util.internal.PlatformDependent
+import java.util.concurrent.ConcurrentHashMap
 
 class MemoryStore : Store {
     private val store: MutableMap<String, Any> = ConcurrentHashMap()

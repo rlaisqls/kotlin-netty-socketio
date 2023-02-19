@@ -9,10 +9,10 @@ class BroadcastAckCallback<T> @JvmOverloads constructor(val resultClass: Class<T
     val loopFinished = AtomicBoolean()
     val counter = AtomicInteger()
     val successExecuted = AtomicBoolean()
-    fun createClientCallback(client: SocketIOClient?): com.gribouille.socketio.AckCallback<T> {
+    fun createClientCallback(client: SocketIOClient?): AckCallback {
         counter.getAndIncrement()
-        return object : com.gribouille.socketio.AckCallback<T>(resultClass, timeout) {
-            override fun onSuccess(result: T) {
+        return object : AckCallback(resultClass, timeout) {
+            override fun onSuccess(result: Any?) {
                 counter.getAndDecrement()
                 onClientSuccess(client, result)
                 executeSuccess()
@@ -25,7 +25,7 @@ class BroadcastAckCallback<T> @JvmOverloads constructor(val resultClass: Class<T
     }
 
     protected fun onClientTimeout(client: SocketIOClient?) {}
-    protected fun onClientSuccess(client: SocketIOClient?, result: T) {}
+    protected fun onClientSuccess(client: SocketIOClient?, result: Any?) {}
     protected fun onAllSuccess() {}
     private fun executeSuccess() {
         if (loopFinished.get() && counter.get() == 0 && successExecuted.compareAndSet(false, true)) {

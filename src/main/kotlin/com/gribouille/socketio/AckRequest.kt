@@ -65,7 +65,7 @@ class AckRequest(originalPacket: Packet, client: SocketIOClient) {
         val ackPacket = Packet(PacketType.MESSAGE)
         ackPacket.subType = PacketType.ACK
         ackPacket.ackId = originalPacket.ackId
-        ackPacket.setData(objs)
+        ackPacket.data = objs
         client.send(ackPacket)
     }
 }

@@ -28,7 +28,7 @@ class OnEventScanner : AnnotationScanner {
                 classes.add(param)
             }
             namespace.addMultiTypeEventListener(annotation.value, object : MultiTypeEventListener {
-                override fun onData(client: SocketIOClient?, data: MultiTypeArgs, ackSender: AckRequest?) {
+                override fun onMultiTypeArgs(client: SocketIOClient, data: MultiTypeArgs, ackSender: AckRequest) {
                     try {
                         val args = arrayOfNulls<Any>(method.parameterTypes.size)
                         if (socketIOClientIndex != -1) {
@@ -52,11 +52,11 @@ class OnEventScanner : AnnotationScanner {
             }, *classes.toTypedArray())
         } else {
             var objectType: Class<*>? = Void::class.java
-            if (!dataIndexes.isEmpty()) {
+            if (dataIndexes.isNotEmpty()) {
                 objectType = method.parameterTypes[dataIndexes.iterator().next()]
             }
-            namespace.addEventListener(annotation.value, objectType, object : DataListener<Any?> {
-                override fun onData(client: SocketIOClient?, data: MultiTypeArgs, ackSender: AckRequest?) {
+            namespace.addEventListener(annotation.value, objectType!!, object : DataListener {
+                override fun onData(client: SocketIOClient, data: Any, ackSender: AckRequest) {
                     try {
                         val args = arrayOfNulls<Any>(method.parameterTypes.size)
                         if (socketIOClientIndex != -1) {
@@ -65,7 +65,7 @@ class OnEventScanner : AnnotationScanner {
                         if (ackRequestIndex != -1) {
                             args[ackRequestIndex] = ackSender
                         }
-                        if (!dataIndexes.isEmpty()) {
+                        if (dataIndexes.isNotEmpty()) {
                             val dataIndex = dataIndexes.iterator().next()
                             args[dataIndex] = data
                         }

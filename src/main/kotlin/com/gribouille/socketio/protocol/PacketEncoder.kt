@@ -2,14 +2,21 @@
 package com.gribouille.socketio.protocol
 
 import com.gribouille.socketio.Configuration
+import io.netty.buffer.ByteBuf
+import io.netty.buffer.ByteBufAllocator
+import io.netty.buffer.ByteBufOutputStream
+import io.netty.buffer.Unpooled
 import io.netty.handler.codec.base64.Base64
+import io.netty.handler.codec.base64.Base64Dialect
 import io.netty.util.CharsetUtil
+import java.io.IOException
 import java.util.*
+import kotlin.math.log10
 
 class PacketEncoder(configuration: Configuration, val jsonSupport: JsonSupport) {
     private val configuration: Configuration
     fun allocateBuffer(allocator: ByteBufAllocator): ByteBuf {
-        return if (configuration.isPreferDirectBuffer()) {
+        return if (configuration.isPreferDirectBuffer) {
             allocator.ioBuffer()
         } else allocator.heapBuffer()
     }
@@ -79,7 +86,7 @@ class PacketEncoder(configuration: Configuration, val jsonSupport: JsonSupport) 
             i++
             for (attachment in packet.attachments) {
                 buffer.writeByte(1)
-                buffer.writeBytes(longToBytes((attachment.readableBytes() + 1).toLong()))
+                buffer.writeBytes(longToBytes((attachment!!.readableBytes() + 1).toLong()))
                 buffer.writeByte(0xff)
                 buffer.writeByte(4)
                 buffer.writeBytes(attachment)
@@ -101,7 +108,7 @@ class PacketEncoder(configuration: Configuration, val jsonSupport: JsonSupport) 
         if (!binary) {
             buf = allocateBuffer(allocator)
         }
-        val type = toChar(packet.type.value)
+        val type = toChar(packet.type!!.value)
         buf.writeByte(type.toInt())
         try {
             when (packet.type) {
@@ -142,7 +149,7 @@ class PacketEncoder(configuration: Configuration, val jsonSupport: JsonSupport) 
                                 if (packet.subType == PacketType.ACK) PacketType.BINARY_ACK else PacketType.BINARY_EVENT
                         }
                     }
-                    val subType = toChar(packet.subType.value)
+                    val subType = toChar(packet.subType!!.value)
                     buf.writeByte(subType.toInt())
                     if (packet.hasAttachments()) {
                         val ackId = toChars(packet.attachments.size.toLong())
@@ -160,7 +167,7 @@ class PacketEncoder(configuration: Configuration, val jsonSupport: JsonSupport) 
                         }
                     }
                     if (packet.ackId != null) {
-                        val ackId = toChars(packet.ackId)
+                        val ackId = toChars(packet.ackId!!)
                         buf.writeBytes(ackId)
                     }
                     if (encBuf != null) {
@@ -168,6 +175,8 @@ class PacketEncoder(configuration: Configuration, val jsonSupport: JsonSupport) 
                         encBuf.release()
                     }
                 }
+
+                else -> {}
             }
         } finally {
             // we need to write a buffer in any case
@@ -265,17 +274,17 @@ class PacketEncoder(configuration: Configuration, val jsonSupport: JsonSupport) 
         fun longToBytes(number: Long): ByteArray {
             // TODO optimize
             var number = number
-            val length = (Math.log10(number.toDouble()) + 1).toInt()
+            val length = (log10(number.toDouble()) + 1).toInt()
             val res = ByteArray(length)
             var i = length
             while (number > 0) {
                 res[--i] = (number % 10).toByte()
-                number = number / 10
+                number /= 10
             }
             return res
         }
 
-        fun find(buffer: ByteBuf?, searchValue: ByteBuf): Int {
+        fun find(buffer: ByteBuf, searchValue: ByteBuf): Int {
             for (i in buffer.readerIndex() until buffer.readerIndex() + buffer.readableBytes()) {
                 if (isValueFound(buffer, i, searchValue)) {
                     return i
@@ -284,7 +293,7 @@ class PacketEncoder(configuration: Configuration, val jsonSupport: JsonSupport) 
             return -1
         }
 
-        private fun isValueFound(buffer: ByteBuf?, index: Int, search: ByteBuf): Boolean {
+        private fun isValueFound(buffer: ByteBuf, index: Int, search: ByteBuf): Boolean {
             for (i in 0 until search.readableBytes()) {
                 if (buffer.getByte(index + i) != search.getByte(i)) {
                     return false

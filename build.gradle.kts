@@ -13,10 +13,11 @@ repositories {
 }
 
 dependencies {
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.14.2")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
 
-    val nettyVersion = "4.1.71.Final"
+    val nettyVersion = "4.1.86.Final"
     implementation("io.netty:netty-buffer:$nettyVersion")
     implementation("io.netty:netty-common:$nettyVersion")
     implementation("io.netty:netty-transport:$nettyVersion")
@@ -25,7 +26,8 @@ dependencies {
     implementation("io.netty:netty-codec:$nettyVersion")
     implementation("io.netty:netty-transport-native-epoll:$nettyVersion")
 
-    implementation("org.slf4j:slf4j-api:1.7.32")
+    implementation("org.slf4j:slf4j-api:1.7.7")
+    implementation("ch.qos.logback:logback-classic:1.1.2")
 }
 
 tasks.withType<KotlinCompile> {

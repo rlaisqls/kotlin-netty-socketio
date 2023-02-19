@@ -1,26 +1,24 @@
 
 package com.gribouille.socketio.store
 
-import com.gribouille.socketio.store.pubsub.BaseStoreFactory
-import io.netty.util.internal.PlatformDependent
+import com.gribouille.socketio.handler.ClientHead
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 
 class MemoryStoreFactory : BaseStoreFactory() {
-    private val pubSubMemoryStore = MemoryPubSubStore()
-    fun createStore(sessionId: UUID?): Store {
+
+    override fun createStore(sessionId: UUID?): Store {
         return MemoryStore()
     }
 
-    fun pubSubStore(): PubSubStore {
-        return pubSubMemoryStore
-    }
+    override fun onDisconnect(client: ClientHead) {}
 
-    fun shutdown() {}
+    override fun shutdown() {}
     override fun toString(): String {
         return javaClass.simpleName + " (local session store only)"
     }
 
-    fun <K, V> createMap(name: String?): Map<K, V> {
+    override fun <K, V> createMap(name: String?): Map<K, V> {
         return ConcurrentHashMap()
     }
 }

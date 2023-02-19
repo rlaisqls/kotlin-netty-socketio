@@ -2,11 +2,37 @@
 package com.gribouille.socketio
 
 import com.gribouille.socketio.ack.AckManager
+import com.gribouille.socketio.handler.AuthorizeHandler
+import com.gribouille.socketio.handler.ClientHead
+import com.gribouille.socketio.handler.ClientsBox
+import com.gribouille.socketio.handler.EncoderHandler
+import com.gribouille.socketio.handler.InPacketHandler
+import com.gribouille.socketio.handler.PacketListener
+import com.gribouille.socketio.handler.WrongUrlHandler
+import com.gribouille.socketio.namespace.NamespacesHub
+import com.gribouille.socketio.protocol.PacketDecoder
+import com.gribouille.socketio.protocol.PacketEncoder
+import com.gribouille.socketio.scheduler.CancelableScheduler
+import com.gribouille.socketio.scheduler.HashedWheelTimeoutScheduler
+import com.gribouille.socketio.store.StoreFactory
+import com.gribouille.socketio.transport.PollingTransport
+import com.gribouille.socketio.transport.WebSocketTransport
 import io.netty.channel.Channel
+import io.netty.channel.ChannelHandlerContext
+import io.netty.channel.ChannelInitializer
+import io.netty.channel.ChannelPipeline
+import io.netty.handler.codec.http.HttpContentCompressor
 import io.netty.handler.codec.http.HttpMessage
+import io.netty.handler.codec.http.HttpObjectAggregator
+import io.netty.handler.codec.http.HttpRequestDecoder
+import io.netty.handler.codec.http.HttpResponseEncoder
+import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketServerCompressionHandler
 import org.slf4j.LoggerFactory
+import javax.net.ssl.KeyManagerFactory
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
 
-class SocketIOChannelInitializer : ChannelInitializer<Channel?>(), DisconnectableHub {
+class SocketIOChannelInitializer : ChannelInitializer<Channel>(), DisconnectableHub {
     private var ackManager: AckManager? = null
     private val clientsBox: ClientsBox = ClientsBox()
     private var authorizeHandler: AuthorizeHandler? = null
@@ -23,37 +49,32 @@ class SocketIOChannelInitializer : ChannelInitializer<Channel?>(), Disconnectabl
         scheduler.update(ctx)
     }
 
-    fun start(configuration: Configuration, namespacesHub: NamespacesHub?) {
+    fun start(
+        configuration: Configuration,
+        namespacesHub: NamespacesHub?
+    ) {
         this.configuration = configuration
         ackManager = AckManager(scheduler)
-        val jsonSupport: JsonSupport = configuration.getJsonSupport()
+        val jsonSupport = configuration.jsonSupport!!
         val encoder = PacketEncoder(configuration, jsonSupport)
-        val decoder = PacketDecoder(jsonSupport, ackManager)
-        val connectPath: String = configuration.getContext() + "/"
-        val isSsl = configuration.getKeyStore() != null
-        if (isSsl) {
-            sslContext = try {
-                createSSLContext(configuration)
-            } catch (e: Exception) {
-                throw IllegalStateException(e)
-            }
-        }
-        val factory: StoreFactory = configuration.getStoreFactory()
+        val decoder = PacketDecoder(jsonSupport, ackManager!!)
+        val connectPath: String = configuration.context + "/"
+
+        val factory: StoreFactory = configuration.storeFactory
         authorizeHandler = AuthorizeHandler(
             connectPath,
             scheduler,
             configuration,
-            namespacesHub,
+            namespacesHub!!,
             factory,
             this,
-            ackManager,
+            ackManager!!,
             clientsBox
         )
-        factory.init(namespacesHub, authorizeHandler, jsonSupport)
-        xhrPollingTransport = PollingTransport(decoder, authorizeHandler, clientsBox)
-        webSocketTransport = WebSocketTransport(isSsl, authorizeHandler, configuration, scheduler, clientsBox)
-        val packetListener = PacketListener(ackManager, namespacesHub, xhrPollingTransport, scheduler)
-        packetHandler = InPacketHandler(packetListener, decoder, namespacesHub, configuration.getExceptionListener())
+        xhrPollingTransport = PollingTransport(decoder, authorizeHandler!!, clientsBox)
+        webSocketTransport = WebSocketTransport(authorizeHandler!!, configuration, scheduler, clientsBox)
+        val packetListener = PacketListener(namespacesHub, ackManager!!, scheduler, xhrPollingTransport!!)
+        packetHandler = InPacketHandler(packetListener, decoder, namespacesHub, configuration.exceptionListener)
         try {
             encoderHandler = EncoderHandler(configuration, encoder)
         } catch (e: Exception) {
@@ -65,50 +86,28 @@ class SocketIOChannelInitializer : ChannelInitializer<Channel?>(), Disconnectabl
     @Throws(Exception::class)
     protected override fun initChannel(ch: Channel) {
         val pipeline: ChannelPipeline = ch.pipeline()
-        addSslHandler(pipeline)
         addSocketioHandlers(pipeline)
     }
 
-    /**
-     * Adds the ssl handler
-     *
-     * @param pipeline - channel pipeline
-     */
-    protected fun addSslHandler(pipeline: ChannelPipeline) {
-        if (sslContext != null) {
-            val engine: SSLEngine = sslContext.createSSLEngine()
-            engine.setUseClientMode(false)
-            if (configuration.isNeedClientAuth() && configuration.getTrustStore() != null) {
-                engine.setNeedClientAuth(true)
-            }
-            pipeline.addLast(SSL_HANDLER, SslHandler(engine))
-        }
-    }
-
-    /**
-     * Adds the socketio channel handlers
-     *
-     * @param pipeline - channel pipeline
-     */
     protected fun addSocketioHandlers(pipeline: ChannelPipeline) {
         pipeline.addLast(HTTP_REQUEST_DECODER, HttpRequestDecoder())
-        pipeline.addLast(HTTP_AGGREGATOR, object : HttpObjectAggregator(configuration.getMaxHttpContentLength()) {
-            protected override fun newContinueResponse(
+        pipeline.addLast(HTTP_AGGREGATOR, object : HttpObjectAggregator(configuration!!.maxHttpContentLength) {
+            override fun newContinueResponse(
                 start: HttpMessage, maxContentLength: Int,
                 pipeline: ChannelPipeline
-            ): Any {
+            ): Any? {
                 return null
             }
         })
         pipeline.addLast(HTTP_ENCODER, HttpResponseEncoder())
-        if (configuration.isHttpCompression()) {
+        if (configuration!!.isHttpCompression) {
             pipeline.addLast(HTTP_COMPRESSION, HttpContentCompressor())
         }
         pipeline.addLast(PACKET_HANDLER, packetHandler)
         pipeline.addLast(AUTHORIZE_HANDLER, authorizeHandler)
         pipeline.addLast(XHR_POLLING_TRANSPORT, xhrPollingTransport)
         // TODO use single instance when https://github.com/netty/netty/issues/4755 will be resolved
-        if (configuration.isWebsocketCompression()) {
+        if (configuration!!.isWebsocketCompression) {
             pipeline.addLast(WEB_SOCKET_TRANSPORT_COMPRESSION, WebSocketServerCompressionHandler())
         }
         pipeline.addLast(WEB_SOCKET_TRANSPORT, webSocketTransport)
@@ -116,36 +115,15 @@ class SocketIOChannelInitializer : ChannelInitializer<Channel?>(), Disconnectabl
         pipeline.addLast(WRONG_URL_HANDLER, wrongUrlHandler)
     }
 
-    @Throws(Exception::class)
-    private fun createSSLContext(configuration: Configuration): SSLContext {
-        var managers: Array<TrustManager?>? = null
-        if (configuration.getTrustStore() != null) {
-            val ts: KeyStore = KeyStore.getInstance(configuration.getTrustStoreFormat())
-            ts.load(configuration.getTrustStore(), configuration.getTrustStorePassword().toCharArray())
-            val tmf: TrustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
-            tmf.init(ts)
-            managers = tmf.getTrustManagers()
-        }
-        val ks: KeyStore = KeyStore.getInstance(configuration.getKeyStoreFormat())
-        ks.load(configuration.getKeyStore(), configuration.getKeyStorePassword().toCharArray())
-        val kmf: KeyManagerFactory = KeyManagerFactory.getInstance(configuration.getKeyManagerFactoryAlgorithm())
-        kmf.init(ks, configuration.getKeyStorePassword().toCharArray())
-        val serverContext: SSLContext = SSLContext.getInstance(configuration.getSSLProtocol())
-        serverContext.init(kmf.getKeyManagers(), managers, null)
-        return serverContext
-    }
-
-    fun onDisconnect(client: ClientHead) {
-        ackManager.onDisconnect(client)
-        authorizeHandler.onDisconnect(client)
-        configuration.getStoreFactory().onDisconnect(client)
-        configuration.getStoreFactory().pubSubStore()
-            .publish(PubSubType.DISCONNECT, DisconnectMessage(client.getSessionId()))
-        log.debug("Client with sessionId: {} disconnected", client.getSessionId())
+    override fun onDisconnect(client: ClientHead) {
+        ackManager!!.onDisconnect(client)
+        authorizeHandler!!.onDisconnect(client)
+        configuration!!.storeFactory.onDisconnect(client)
+        log.debug("Client with sessionId: {} disconnected", client.sessionId)
     }
 
     fun stop() {
-        val factory: StoreFactory = configuration.getStoreFactory()
+        val factory: StoreFactory = configuration!!.storeFactory
         factory.shutdown()
         scheduler.shutdown()
     }

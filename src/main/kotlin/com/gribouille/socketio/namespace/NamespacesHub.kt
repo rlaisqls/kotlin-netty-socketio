@@ -2,49 +2,40 @@
 package com.gribouille.socketio.namespace
 
 import com.gribouille.socketio.Configuration
+import com.gribouille.socketio.SocketIOClient
+import com.gribouille.socketio.SocketIONamespace
+import com.gribouille.socketio.misc.CompositeIterable
 import io.netty.util.internal.PlatformDependent
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentMap
 
-class NamespacesHub(configuration: Configuration) {
-    private val namespaces: ConcurrentMap<String, SocketIONamespace> =
-        PlatformDependent.newConcurrentHashMap<String, SocketIONamespace>()
+class NamespacesHub(
+    configuration: Configuration
+) {
+    private val namespaces: ConcurrentMap<String, SocketIONamespace> = ConcurrentHashMap()
     private val configuration: Configuration
-
+    val allNamespaces: Collection<SocketIONamespace>
+        get() = namespaces.values
     init {
         this.configuration = configuration
     }
 
-    fun create(name: String?): Namespace {
-        var namespace: Namespace? = namespaces.get(name)
-        if (namespace == null) {
-            namespace = Namespace(name, configuration)
-            val oldNamespace = namespaces.putIfAbsent(name, namespace) as Namespace
-            if (oldNamespace != null) {
-                namespace = oldNamespace
-            }
-        }
-        return namespace
-    }
+    fun create(name: String) =
+        namespaces[name] ?: Namespace(name, configuration).also { namespaces.putIfAbsent(name, it) }
 
-    fun getRoomClients(room: String?): Iterable<SocketIOClient> {
-        val allClients: MutableList<Iterable<SocketIOClient?>?> = ArrayList<Iterable<SocketIOClient?>?>()
-        for (namespace in namespaces.values) {
-            val clients: Iterable<SocketIOClient?>? = (namespace as Namespace).getRoomClients(room)
-            allClients.add(clients)
+    fun getRoomClients(room: String): Iterable<SocketIOClient> {
+        val allClients = ArrayList<MutableIterable<SocketIOClient>>()
+        namespaces.values.map {
+            allClients.add((it as Namespace).getRoomClients(room))
         }
-        return CompositeIterable<SocketIOClient>(allClients)
+        return CompositeIterable(allClients.toList())
     }
 
     operator fun get(name: String?): Namespace {
-        return namespaces.get(name)
+        return namespaces[name] as Namespace
     }
 
     fun remove(name: String?) {
-        val namespace: SocketIONamespace = namespaces.remove(name)
-        if (namespace != null) {
-            namespace.getBroadcastOperations().disconnect()
-        }
+        namespaces.remove(name)?.broadcastOperations?.disconnect()
     }
-
-    val allNamespaces: Collection<Any>
-        get() = namespaces.values
 }

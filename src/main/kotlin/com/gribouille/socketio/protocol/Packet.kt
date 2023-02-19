@@ -2,66 +2,48 @@
 package com.gribouille.socketio.protocol
 
 import com.gribouille.socketio.namespace.Namespace
+import io.netty.buffer.ByteBuf
 import java.io.Serializable
 
-class Packet : Serializable {
+class Packet(
     var type: PacketType? = null
-        private set
+) : Serializable {
     var subType: PacketType? = null
     var ackId: Long? = null
     var name: String? = null
     var nsp: String = Namespace.DEFAULT_NAME
-    private var data: Any? = null
-    private var dataSource: ByteBuf? = null
+    var data: Any? = null
+    var attachments: MutableList<ByteBuf?> = mutableListOf()
     private var attachmentsCount = 0
-    private var attachments: List<ByteBuf?> = emptyList<ByteBuf>()
+    var dataSource: ByteBuf? = null
 
-    protected constructor()
-    constructor(type: PacketType?) : super() {
-        this.type = type
+    val isAttachmentsLoaded: Boolean
+        get() = attachments.size == attachmentsCount
+
+    @JvmName("getTypedData")
+    fun <T> getData(): T {
+        return data as T
     }
 
-    fun setData(data: Any?) {
-        this.data = data
-    }
-
-    /**
-     * Get packet data
-     *
-     * @param <T> the type data
-     *
-     * <pre>
-     * @return **json object** for PacketType.JSON type
-     * **message** for PacketType.MESSAGE type
-    </pre> *
-    </T> */
-    fun <T> getData(): T? {
-        return data as T?
-    }
-
-    /**
-     * Creates a copy of #[Packet] with new namespace set
-     * if it differs from current namespace.
-     * Otherwise, returns original object unchanged
-     *
-     * @param namespace
-     * @return packet
-     */
     fun withNsp(namespace: String): Packet {
         return if (nsp.equals(namespace, ignoreCase = true)) {
             this
         } else {
-            val newPacket = Packet(type)
-            newPacket.ackId = ackId
-            newPacket.setData(data)
-            newPacket.setDataSource(dataSource)
-            newPacket.name = name
-            newPacket.subType = subType
-            newPacket.nsp = namespace
-            newPacket.attachments = attachments
-            newPacket.attachmentsCount = attachmentsCount
-            newPacket
+            copyWithNsp(namespace)
         }
+    }
+
+    private fun copyWithNsp(namespace: String): Packet {
+        val newPacket = Packet(type)
+        newPacket.ackId = ackId
+        newPacket.data = data
+        newPacket.dataSource = dataSource
+        newPacket.name = name
+        newPacket.subType = subType
+        newPacket.nsp = namespace
+        newPacket.attachments = attachments
+        newPacket.attachmentsCount = attachmentsCount
+        return newPacket
     }
 
     val isAckRequested: Boolean
@@ -69,7 +51,6 @@ class Packet : Serializable {
 
     fun initAttachments(attachmentsCount: Int) {
         this.attachmentsCount = attachmentsCount
-        attachments = ArrayList<ByteBuf>(attachmentsCount)
     }
 
     fun addAttachment(attachment: ByteBuf?) {
@@ -78,23 +59,8 @@ class Packet : Serializable {
         }
     }
 
-    fun getAttachments(): List<ByteBuf?> {
-        return attachments
-    }
-
     fun hasAttachments(): Boolean {
         return attachmentsCount != 0
-    }
-
-    val isAttachmentsLoaded: Boolean
-        get() = attachments.size == attachmentsCount
-
-    fun getDataSource(): ByteBuf? {
-        return dataSource
-    }
-
-    fun setDataSource(dataSource: ByteBuf?) {
-        this.dataSource = dataSource
     }
 
     override fun toString(): String {

@@ -8,5 +8,5 @@ interface AuthorizationListener {
      * @param data - handshake data
      * @return - **true** if client is authorized of **false** otherwise
      */
-    fun isAuthorized(data: com.gribouille.socketio.HandshakeData?): Boolean
+    fun isAuthorized(data: HandshakeData): Boolean
 }

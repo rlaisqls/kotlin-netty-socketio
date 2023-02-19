@@ -4,6 +4,7 @@ package com.gribouille.socketio.handler
 import com.gribouille.socketio.protocol.Packet
 import io.netty.channel.Channel
 import java.util.*
+import java.util.concurrent.ConcurrentLinkedQueue
 
 class TransportState {
     var packetsQueue: Queue<Packet?>? = ConcurrentLinkedQueue<Packet>()

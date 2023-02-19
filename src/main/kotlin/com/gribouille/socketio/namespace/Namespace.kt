@@ -1,89 +1,97 @@
-
 package com.gribouille.socketio.namespace
 
 import com.gribouille.socketio.AckMode
-import io.netty.util.internal.PlatformDependent
+import com.gribouille.socketio.AckRequest
+import com.gribouille.socketio.BroadcastOperations
+import com.gribouille.socketio.Configuration
+import com.gribouille.socketio.MultiTypeArgs
+import com.gribouille.socketio.SingleRoomBroadcastOperations
+import com.gribouille.socketio.SocketIOClient
+import com.gribouille.socketio.SocketIONamespace
+import com.gribouille.socketio.annotation.ScannerEngine
+import com.gribouille.socketio.listener.ConnectListener
+import com.gribouille.socketio.listener.DataListener
+import com.gribouille.socketio.listener.DisconnectListener
+import com.gribouille.socketio.listener.EventInterceptor
+import com.gribouille.socketio.listener.ExceptionListener
+import com.gribouille.socketio.listener.MultiTypeEventListener
+import com.gribouille.socketio.listener.PingListener
+import com.gribouille.socketio.listener.PongListener
+import com.gribouille.socketio.protocol.JsonSupport
+import com.gribouille.socketio.protocol.Packet
+import com.gribouille.socketio.store.StoreFactory
+import com.gribouille.socketio.transport.NamespaceClient
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.ConcurrentMap
 
-/**
- * Hub object for all clients in one namespace.
- * Namespace shares by different namespace-clients.
- *
- * @see com.gribouille.socketio.transport.NamespaceClient
- */
-class Namespace(val name: String?, configuration: Configuration) : SocketIONamespace {
-    private val engine: ScannerEngine = ScannerEngine()
-    private val eventListeners: ConcurrentMap<String, EventEntry<*>> =
-        PlatformDependent.newConcurrentHashMap<String, EventEntry<*>>()
-    private val connectListeners: Queue<ConnectListener> = ConcurrentLinkedQueue<ConnectListener>()
-    private val disconnectListeners: Queue<DisconnectListener> = ConcurrentLinkedQueue<DisconnectListener>()
-    private val pingListeners: Queue<PingListener> = ConcurrentLinkedQueue<PingListener>()
-    private val pongListeners: Queue<PongListener> = ConcurrentLinkedQueue<PongListener>()
-    private val eventInterceptors: Queue<EventInterceptor> = ConcurrentLinkedQueue<EventInterceptor>()
-    private val allClients: MutableMap<UUID, SocketIOClient> =
-        PlatformDependent.newConcurrentHashMap<UUID, SocketIOClient>()
-    private val roomClients: ConcurrentMap<String?, Set<UUID>> =
-        PlatformDependent.newConcurrentHashMap<String?, Set<UUID>>()
-    private val clientRooms: ConcurrentMap<UUID, Set<String?>> =
-        PlatformDependent.newConcurrentHashMap<UUID, Set<String?>>()
-    private val ackMode: AckMode
-    private val jsonSupport: JsonSupport
-    private val storeFactory: StoreFactory
-    private val exceptionListener: ExceptionListener
+class Namespace(
+    override val name: String,
+    configuration: Configuration
+) : SocketIONamespace {
+    private val engine = ScannerEngine()
+    private val eventListeners: ConcurrentMap<String, EventEntry> = ConcurrentHashMap()
+    private val connectListeners: Queue<ConnectListener> = ConcurrentLinkedQueue()
+    private val disconnectListeners: Queue<DisconnectListener> = ConcurrentLinkedQueue()
+    private val pingListeners: Queue<PingListener> = ConcurrentLinkedQueue()
+    private val pongListeners: Queue<PongListener> = ConcurrentLinkedQueue()
+    private val eventInterceptors: Queue<EventInterceptor> = ConcurrentLinkedQueue()
+    private val roomClients: ConcurrentMap<String, MutableSet<UUID>> = ConcurrentHashMap()
+    private val clientRooms: ConcurrentMap<UUID, MutableSet<String>> = ConcurrentHashMap()
+    private val ackMode: AckMode = configuration.ackMode
+    private val jsonSupport: JsonSupport = configuration.jsonSupport!!
+    private val storeFactory: StoreFactory = configuration.storeFactory
+    private val exceptionListener: ExceptionListener = configuration.exceptionListener
 
-    init {
-        jsonSupport = configuration.getJsonSupport()
-        storeFactory = configuration.getStoreFactory()
-        exceptionListener = configuration.getExceptionListener()
-        ackMode = configuration.getAckMode()
-    }
+    private val clients: MutableMap<UUID, SocketIOClient> = ConcurrentHashMap()
+    override val allClients: Collection<SocketIOClient>
+        get() = clients.values
+    val rooms: Set<String>
+        get() = roomClients.keys.toSet()
 
     fun addClient(client: SocketIOClient) {
-        allClients[client.getSessionId()] = client
+        clients[client.sessionId] = client
     }
 
-    fun addMultiTypeEventListener(
-        eventName: String?, listener: MultiTypeEventListener,
-        vararg eventClass: Class<*>?
+    override fun addMultiTypeEventListener(
+        eventName: String,
+        listener: MultiTypeEventListener,
+        vararg eventClass: Class<*>
     ) {
-        var entry: EventEntry<*>? = eventListeners.get(eventName)
-        if (entry == null) {
-            entry = EventEntry<Any?>()
-            val oldEntry: EventEntry<*> = eventListeners.putIfAbsent(eventName, entry)
-            if (oldEntry != null) {
-                entry = oldEntry
-            }
-        }
+        val entry = eventListeners[eventName] ?: EventEntry().also { eventListeners.putIfAbsent(eventName, it) }
         entry.addListener(listener)
-        jsonSupport.addEventMapping(name, eventName, eventClass)
+        jsonSupport.addEventMapping(name, eventName, *eventClass)
     }
 
-    fun removeAllListeners(eventName: String?) {
-        val entry: EventEntry<*> = eventListeners.remove(eventName)
+    override fun removeAllListeners(eventName: String) {
+        val entry = eventListeners.remove(eventName)
         if (entry != null) {
             jsonSupport.removeEventMapping(name, eventName)
         }
     }
 
-    fun <T> addEventListener(eventName: String?, eventClass: Class<T>?, listener: DataListener<T>) {
-        var entry: EventEntry<*>? = eventListeners.get(eventName)
-        if (entry == null) {
-            entry = EventEntry<T>()
-            val oldEntry: EventEntry<*> = eventListeners.putIfAbsent(eventName, entry)
-            if (oldEntry != null) {
-                entry = oldEntry
-            }
-        }
+    override fun addEventListener(
+        eventName: String,
+        eventClass: Class<*>,
+        listener: DataListener
+    ) {
+        var entry = eventListeners[eventName] ?: EventEntry().also { eventListeners.putIfAbsent(eventName, it) }
         entry.addListener(listener)
         jsonSupport.addEventMapping(name, eventName, eventClass)
     }
 
-    fun addEventInterceptor(eventInterceptor: EventInterceptor) {
+    override fun addEventInterceptor(eventInterceptor: EventInterceptor) {
         eventInterceptors.add(eventInterceptor)
     }
 
-    fun onEvent(client: NamespaceClient?, eventName: String?, args: List<Any>, ackRequest: AckRequest) {
-        val entry: EventEntry<*> = eventListeners.get(eventName) ?: return
+    fun onEvent(
+        client: NamespaceClient,
+        eventName: String,
+        args: List<Any>,
+        ackRequest: AckRequest
+    ) {
+        val entry = eventListeners.get(eventName) ?: return
         try {
             val listeners: Queue<DataListener> = entry.listeners
             for (dataListener in listeners) {
@@ -110,32 +118,31 @@ class Namespace(val name: String?, configuration: Configuration) : SocketIONames
         }
     }
 
-    private fun getEventData(args: List<Any>, dataListener: DataListener<*>): Any? {
+    private fun getEventData(
+        args: List<Any>,
+        dataListener: DataListener
+    ): Any {
         if (dataListener is MultiTypeEventListener) {
             return MultiTypeArgs(args)
-        } else {
-            if (!args.isEmpty()) {
-                return args[0]
-            }
-        }
-        return null
+        } else if (args.isNotEmpty()) {
+            return args[0]
+
+        } else error("")
     }
 
-    fun addDisconnectListener(listener: DisconnectListener) {
+    override fun addDisconnectListener(listener: DisconnectListener) {
         disconnectListeners.add(listener)
     }
 
     fun onDisconnect(client: SocketIOClient) {
-        val joinedRooms: Set<String> = client.getAllRooms()
-        allClients.remove(client.getSessionId())
+        val joinedRooms = client.allRooms
+        clients.remove(client.sessionId)
 
         // client must leave all rooms and publish the leave msg one by one on disconnect.
         for (joinedRoom in joinedRooms) {
-            leave<String?, UUID>(roomClients, joinedRoom, client.getSessionId())
-            storeFactory.pubSubStore()
-                .publish(PubSubType.LEAVE, JoinLeaveMessage(client.getSessionId(), joinedRoom, name))
+            leave(roomClients, joinedRoom, client.sessionId)
         }
-        clientRooms.remove(client.getSessionId())
+        clientRooms.remove(client.sessionId)
         try {
             for (listener in disconnectListeners) {
                 listener.onDisconnect(client)
@@ -145,13 +152,12 @@ class Namespace(val name: String?, configuration: Configuration) : SocketIONames
         }
     }
 
-    fun addConnectListener(listener: ConnectListener) {
+    override fun addConnectListener(listener: ConnectListener) {
         connectListeners.add(listener)
     }
 
     fun onConnect(client: SocketIOClient) {
-        join(name, client.getSessionId())
-        storeFactory.pubSubStore().publish(PubSubType.JOIN, JoinLeaveMessage(client.getSessionId(), name, name))
+        join(name, client.sessionId)
         try {
             for (listener in connectListeners) {
                 listener.onConnect(client)
@@ -161,11 +167,11 @@ class Namespace(val name: String?, configuration: Configuration) : SocketIONames
         }
     }
 
-    fun addPingListener(listener: PingListener) {
+    override fun addPingListener(listener: PingListener) {
         pingListeners.add(listener)
     }
 
-    fun addPongListener(listener: PongListener) {
+    override fun addPongListener(listener: PongListener) {
         pongListeners.add(listener)
     }
 
@@ -189,11 +195,11 @@ class Namespace(val name: String?, configuration: Configuration) : SocketIONames
         }
     }
 
-    val broadcastOperations: BroadcastOperations
-        get() = SingleRoomBroadcastOperations(name, name, allClients.values, storeFactory)
+    override val broadcastOperations: BroadcastOperations
+        get() = SingleRoomBroadcastOperations(clients.values, name, name, storeFactory)
 
-    override fun getRoomOperations(room: String?): BroadcastOperations {
-        return SingleRoomBroadcastOperations(name, room, getRoomClients(room), storeFactory)
+    override fun getRoomOperations(room: String): BroadcastOperations {
+        return SingleRoomBroadcastOperations(getRoomClients(room).toList(), name, room, storeFactory)
     }
 
     override fun hashCode(): Int {
@@ -214,114 +220,89 @@ class Namespace(val name: String?, configuration: Configuration) : SocketIONames
         return true
     }
 
-    @JvmOverloads
-    fun addListeners(listeners: Any, listenersClass: Class<*>? = listeners.javaClass) {
+    override fun addListeners(listeners: Any) {
+        addListeners(listeners, listeners.javaClass)
+    }
+
+    override fun addListeners(listeners: Any, listenersClass: Class<*>) {
         engine.scan(this, listeners, listenersClass)
     }
 
-    fun joinRoom(room: String?, sessionId: UUID) {
+    fun joinRoom(room: String, sessionId: UUID) {
         join(room, sessionId)
-        storeFactory.pubSubStore().publish(PubSubType.JOIN, JoinLeaveMessage(sessionId, room, name))
     }
 
-    fun joinRooms(rooms: Set<String?>, sessionId: UUID) {
+    fun joinRooms(rooms: Set<String>, sessionId: UUID) {
         for (room in rooms) {
             join(room, sessionId)
         }
-        storeFactory.pubSubStore().publish(PubSubType.BULK_JOIN, BulkJoinLeaveMessage(sessionId, rooms, name))
     }
 
-    fun dispatch(room: String?, packet: Packet?) {
-        val clients: Iterable<SocketIOClient?> = getRoomClients(room)
+    fun dispatch(room: String, packet: Packet) {
+        val clients = getRoomClients(room)
         for (socketIOClient in clients) {
             socketIOClient.send(packet)
         }
     }
 
-    private fun <K, V> join(map: ConcurrentMap<K, Set<V>>, key: K, value: V) {
-        var clients: MutableSet<V>? = map.get(key)
-        if (clients == null) {
-            clients = Collections.newSetFromMap(ConcurrentHashMap())
-            val oldClients: MutableSet<V> = map.putIfAbsent(key, clients)
-            if (oldClients != null) {
-                clients = oldClients
+    private fun <K, V> join(map: MutableMap<K, MutableSet<V>>, key: K, value: V) {
+        val clients = map[key] ?: Collections.newSetFromMap<V>(ConcurrentHashMap())
+            .let {
+                map.putIfAbsent(key, it) ?: it
             }
-        }
         clients!!.add(value)
-        // object may be changed due to other concurrent call
-        if (clients !== map.get(key)) {
-            // re-join if queue has been replaced
+        if (clients !== map[key]) {
             join(map, key, value)
         }
     }
 
-    fun join(room: String?, sessionId: UUID) {
+    private fun join(room: String, sessionId: UUID) {
         join(roomClients, room, sessionId)
         join(clientRooms, sessionId, room)
     }
 
-    fun leaveRoom(room: String?, sessionId: UUID) {
+    fun leaveRoom(room: String, sessionId: UUID) {
         leave(room, sessionId)
-        storeFactory.pubSubStore().publish(PubSubType.LEAVE, JoinLeaveMessage(sessionId, room, name))
     }
 
-    fun leaveRooms(rooms: Set<String?>, sessionId: UUID) {
+    fun leaveRooms(rooms: Set<String>, sessionId: UUID) {
         for (room in rooms) {
             leave(room, sessionId)
         }
-        storeFactory.pubSubStore().publish(PubSubType.BULK_LEAVE, BulkJoinLeaveMessage(sessionId, rooms, name))
     }
 
-    private fun <K, V> leave(map: ConcurrentMap<K, Set<V>>, room: K, sessionId: V) {
-        val clients: MutableSet<V> = map.get(room) ?: return
+    private fun <K, V> leave(map: ConcurrentMap<K, MutableSet<V>>, room: K, sessionId: V) {
+        val clients: MutableSet<V> = map[room] ?: return
         clients.remove(sessionId)
         if (clients.isEmpty()) {
-            map.remove(room, emptySet<Any>())
+            map.remove(room, emptySet())
         }
     }
 
-    fun leave(room: String?, sessionId: UUID) {
+    fun leave(room: String, sessionId: UUID) {
         leave(roomClients, room, sessionId)
         leave(clientRooms, sessionId, room)
     }
 
     fun getRooms(client: SocketIOClient): Set<String> {
-        val res: Set<String> = clientRooms.get(client.getSessionId())
+        return clientRooms[client.sessionId]?.toSet()
             ?: return emptySet()
-        return Collections.unmodifiableSet(res)
     }
 
-    val rooms: Set<String>
-        get() = roomClients.keys
-
-    fun getRoomClients(room: String?): Iterable<SocketIOClient?> {
-        val sessionIds: Set<UUID> = roomClients.get(room)
-            ?: return emptyList<SocketIOClient>()
-        val result: MutableList<SocketIOClient?> = ArrayList<SocketIOClient?>()
-        for (sessionId in sessionIds) {
-            val client: SocketIOClient? = allClients[sessionId]
-            if (client != null) {
-                result.add(client)
-            }
-        }
-        return result
+    fun getRoomClients(room: String?): MutableIterable<SocketIOClient> {
+        val sessionIds = roomClients[room] ?: return mutableListOf()
+        return sessionIds.mapNotNull { sessionId ->
+            clients[sessionId]
+        }.toMutableList()
     }
 
     fun getRoomClientsInCluster(room: String?): Int {
-        val sessionIds: Set<UUID> = roomClients.get(room)
+        val sessionIds = roomClients.get(room)
         return sessionIds?.size ?: 0
     }
 
-    override fun getAllClients(): Collection<SocketIOClient> {
-        return Collections.unmodifiableCollection<SocketIOClient>(allClients.values)
-    }
-
-    fun getJsonSupport(): JsonSupport {
-        return jsonSupport
-    }
-
     override fun getClient(uuid: UUID): SocketIOClient? {
-        return allClients[uuid]
+        return clients[uuid]
     }
 
     companion object {

@@ -1,84 +1,87 @@
 
 package com.gribouille.socketio.handler
 
+import com.gribouille.socketio.AckRequest
+import com.gribouille.socketio.SocketIOClient
+import com.gribouille.socketio.Transport
 import com.gribouille.socketio.ack.AckManager
+import com.gribouille.socketio.namespace.NamespacesHub
+import com.gribouille.socketio.protocol.Packet
+import com.gribouille.socketio.protocol.PacketType
+import com.gribouille.socketio.scheduler.CancelableScheduler
+import com.gribouille.socketio.scheduler.SchedulerKey
+import com.gribouille.socketio.transport.NamespaceClient
+import com.gribouille.socketio.transport.PollingTransport
 
 class PacketListener(
-    ackManager: AckManager, namespacesHub: NamespacesHub, xhrPollingTransport: PollingTransport?,
-    scheduler: CancelableScheduler
+    private val namespacesHub: NamespacesHub,
+    private val ackManager: AckManager,
+    private val scheduler: CancelableScheduler,
+    xhrPollingTransport: PollingTransport
 ) {
-    private val namespacesHub: NamespacesHub
-    private val ackManager: AckManager
-    private val scheduler: CancelableScheduler
 
-    init {
-        this.ackManager = ackManager
-        this.namespacesHub = namespacesHub
-        this.scheduler = scheduler
-    }
-
-    fun onPacket(packet: Packet, client: NamespaceClient, transport: com.gribouille.socketio.Transport?) {
+    fun onPacket(packet: Packet, client: NamespaceClient, transport: Transport) {
         val ackRequest = AckRequest(packet, client)
-        if (packet.isAckRequested()) {
-            ackManager.initAckIndex(client.getSessionId(), packet.getAckId())
+        if (packet.isAckRequested) {
+            ackManager.initAckIndex(client.sessionId, packet.ackId!!)
         }
-        when (packet.getType()) {
-            PING -> {
+        when (packet.type) {
+            PacketType.PING -> {
                 val outPacket = Packet(PacketType.PONG)
-                outPacket.setData(packet.getData())
+                outPacket.data = packet.data
                 // TODO use future
-                client.getBaseClient().send(outPacket, transport)
-                if ("probe" == packet.getData()) {
-                    client.getBaseClient().send(Packet(PacketType.NOOP), com.gribouille.socketio.Transport.POLLING)
+                client.baseClient.send(outPacket, transport)
+                if ("probe" == packet.data) {
+                    client.baseClient.send(Packet(PacketType.NOOP), Transport.POLLING)
                 } else {
-                    client.getBaseClient().schedulePingTimeout()
+                    client.baseClient.schedulePingTimeout()
                 }
-                val namespace: Namespace = namespacesHub.get(packet.getNsp())
+                val namespace = namespacesHub.get(packet.nsp)
                 namespace.onPing(client)
             }
 
-            PONG -> {
-                client.getBaseClient().schedulePingTimeout()
-                val namespace: Namespace = namespacesHub.get(packet.getNsp())
+            PacketType.PONG -> {
+                client.baseClient.schedulePingTimeout()
+                val namespace = namespacesHub.get(packet.nsp)
                 namespace.onPong(client)
             }
 
-            UPGRADE -> {
-                client.getBaseClient().schedulePingTimeout()
-                val key = SchedulerKey(SchedulerKey.Type.UPGRADE_TIMEOUT, client.getSessionId())
+            PacketType.UPGRADE -> {
+                client.baseClient.schedulePingTimeout()
+                val key = SchedulerKey(SchedulerKey.Type.UPGRADE_TIMEOUT, client.sessionId)
                 scheduler.cancel(key)
-                client.getBaseClient().upgradeCurrentTransport(transport)
+                client.baseClient.upgradeCurrentTransport(transport)
             }
 
-            MESSAGE -> {
-                client.getBaseClient().schedulePingTimeout()
-                if (packet.getSubType() === PacketType.DISCONNECT) {
+            PacketType.MESSAGE -> {
+                client.baseClient.schedulePingTimeout()
+                if (packet.subType === PacketType.DISCONNECT) {
                     client.onDisconnect()
                 }
-                if (packet.getSubType() === PacketType.CONNECT) {
-                    val namespace: Namespace = namespacesHub.get(packet.getNsp())
+                if (packet.subType === PacketType.CONNECT) {
+                    val namespace = namespacesHub[packet.nsp]
                     namespace.onConnect(client)
                     // send connect handshake packet back to client
-                    client.getBaseClient().send(packet, transport)
+                    client.baseClient.send(packet, transport)
                 }
-                if (packet.getSubType() === PacketType.ACK
-                    || packet.getSubType() === PacketType.BINARY_ACK
+                if (packet.subType === PacketType.ACK
+                    || packet.subType === PacketType.BINARY_ACK
                 ) {
                     ackManager.onAck(client, packet)
                 }
-                if (packet.getSubType() === PacketType.EVENT
-                    || packet.getSubType() === PacketType.BINARY_EVENT
+                if (packet.subType === PacketType.EVENT
+                    || packet.subType === PacketType.BINARY_EVENT
                 ) {
-                    val namespace: Namespace = namespacesHub.get(packet.getNsp())
-                    var args: List<Any?> = emptyList<Any>()
-                    if (packet.getData() != null) {
-                        args = packet.getData()
+                    val namespace = namespacesHub[packet.nsp]
+                    var args: List<Any> = emptyList()
+                    if (packet.data != null) {
+                        args = packet.data as List<Any>
                     }
-                    namespace.onEvent(client, packet.getName(), args, ackRequest)
+                    namespace.onEvent(client, packet.name!!, args, ackRequest)
                 }
             }
 
-            CLOSE -> client.getBaseClient().onChannelDisconnect()
+            PacketType.CLOSE -> client.baseClient.onChannelDisconnect()
             else -> {}
         }
     }
