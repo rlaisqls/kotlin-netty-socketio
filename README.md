@@ -29,6 +29,6 @@
 - [netty 서버 예제](https://github.com/rlaisqls/TIL/blob/main/%EA%B0%9C%EB%B0%9C/netty/netty%E2%80%85server%E2%80%85%EC%98%88%EC%A0%9C.md)
 - [자바<?>와 코틀린<*>](https://github.com/rlaisqls/TIL/blob/main/%EC%96%B8%EC%96%B4%E2%80%85Language/%EC%9E%90%EB%B0%94%3C%EF%BC%9F%3E%EC%99%80%E2%80%85%EC%BD%94%ED%8B%80%EB%A6%B0%3C*%3E.md)
 
-## 참고자료
+## 참고 자료
 
 - [책: 네티 인 액션](http://www.yes24.com/Product/Goods/25662949)
