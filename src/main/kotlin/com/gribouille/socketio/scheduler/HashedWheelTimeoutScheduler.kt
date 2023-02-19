@@ -13,11 +13,12 @@ import io.netty.channel.ChannelHandlerContext
 import io.netty.util.HashedWheelTimer
 import io.netty.util.Timeout
 import io.netty.util.internal.PlatformDependent
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ThreadFactory
 import java.util.concurrent.TimeUnit
 
 class HashedWheelTimeoutScheduler : CancelableScheduler {
-    private val scheduledFutures = PlatformDependent.newConcurrentHashMap<SchedulerKey, Timeout>()
+    private val scheduledFutures = ConcurrentHashMap<SchedulerKey, Timeout>()
     private val executorService: HashedWheelTimer
 
     @Volatile

@@ -46,7 +46,7 @@ class AckManager(scheduler: CancelableScheduler) : Disconnectable {
         }
     }
 
-    private val ackEntries: ConcurrentMap<UUID, AckEntry> = PlatformDependent.newConcurrentHashMap<UUID, AckEntry>()
+    private val ackEntries: ConcurrentMap<UUID, AckEntry> = ConcurrentHashMap()
     private val scheduler: CancelableScheduler
 
     init {
