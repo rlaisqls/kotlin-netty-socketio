@@ -160,7 +160,7 @@ class PollingTransport(
             sendError(ctx)
             return
         }
-        client.bindChannel(ctx.channel(), com.gribouille.socketio.Transport.POLLING)
+        client.bindChannel(ctx.channel(), Transport.POLLING)
         authorizeHandler.connect(client)
     }
 
@@ -173,7 +173,7 @@ class PollingTransport(
     override fun channelInactive(ctx: ChannelHandlerContext) {
         val channel: Channel = ctx.channel()
         val client: ClientHead? = clientsBox.get(channel)
-        if (client != null && client.isTransportChannel(ctx.channel(), com.gribouille.socketio.Transport.POLLING)) {
+        if (client != null && client.isTransportChannel(ctx.channel(), Transport.POLLING)) {
             log.debug("channel inactive {}", client.sessionId)
             client.releasePollingChannel(channel)
         }

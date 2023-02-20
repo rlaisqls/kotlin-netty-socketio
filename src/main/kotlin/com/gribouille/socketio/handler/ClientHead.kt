@@ -154,8 +154,25 @@ class ClientHead(
 
     val namespaces: Set<Any?>
         get() = namespaceClients.keys
+
     val isConnected: Boolean
         get() = !disconnected.get()
+
+    val remoteAddress: SocketAddress
+        get() = handshakeData.address
+
+    fun isTransportChannel(channel: Channel, transport: Transport) =
+        channels[transport]?.channel == channel
+
+    val isChannelOpen: Boolean
+        get() {
+            for (state in channels.values) {
+                if (state.channel != null && state.channel!!.isActive) {
+                    return true
+                }
+            }
+            return false
+        }
 
     fun onChannelDisconnect() {
         cancelPing()
@@ -171,29 +188,9 @@ class ClientHead(
         }
     }
 
-    val remoteAddress: SocketAddress
-        get() = handshakeData.address!!
-
     fun disconnect() {
         send(Packet(PacketType.DISCONNECT))?.addListener(ChannelFutureListener.CLOSE)
         onChannelDisconnect()
-    }
-
-    val isChannelOpen: Boolean
-        get() {
-            for (state in channels.values) {
-                if (state.channel != null && state.channel!!.isActive) {
-                    return true
-                }
-            }
-            return false
-        }
-
-    fun isTransportChannel(channel: Channel, transport: Transport): Boolean {
-        val state = channels[transport]
-        return if (state?.channel == null) {
-            false
-        } else state.channel == channel
     }
 
     fun upgradeCurrentTransport(currentTransport: Transport) {

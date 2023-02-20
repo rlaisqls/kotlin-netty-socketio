@@ -242,21 +242,20 @@ class PacketDecoder(private val jsonSupport: JsonSupport, ackManager: AckManager
             if (packet.hasAttachments() && !packet.isAttachmentsLoaded) {
                 return
             }
-            if (packet.subType == PacketType.ACK
-                || packet.subType == PacketType.BINARY_ACK
-            ) {
-                val `in` = ByteBufInputStream(frame)
-                val callback = ackManager.getCallback(head.sessionId!!, packet.ackId!!)!!
-                val args = jsonSupport.readAckArgs(`in`, callback)
-                packet.data = args.args
-            }
-            if (packet.subType == PacketType.EVENT
-                || packet.subType == PacketType.BINARY_EVENT
-            ) {
-                val `in` = ByteBufInputStream(frame)
-                val event = jsonSupport.readValue(packet.nsp, `in`, Event::class.java)
-                packet.name = event.name
-                packet.data = event.args
+            when (packet.subType) {
+                PacketType.ACK, PacketType.BINARY_ACK -> {
+                    val `in` = ByteBufInputStream(frame)
+                    val callback = ackManager.getCallback(head.sessionId!!, packet.ackId!!)!!
+                    val args = jsonSupport.readAckArgs(`in`, callback)
+                    packet.data = args.args
+                }
+                PacketType.EVENT, PacketType.BINARY_EVENT -> {
+                    val `in` = ByteBufInputStream(frame)
+                    val event = jsonSupport.readValue(packet.nsp, `in`, Event::class.java)
+                    packet.name = event.name
+                    packet.data = event.args
+                }
+                else -> {}
             }
         }
     }

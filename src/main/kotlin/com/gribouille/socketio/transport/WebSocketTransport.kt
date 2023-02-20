@@ -100,8 +100,7 @@ class WebSocketTransport(
 
     @Throws(Exception::class)
     override fun channelReadComplete(ctx: ChannelHandlerContext) {
-        if (clientsBox[ctx.channel()]
-            ?.isTransportChannel(ctx.channel(), Transport.WEBSOCKET) == true) {
+        if (clientsBox[ctx.channel()]?.isTransportChannel(ctx.channel(), Transport.WEBSOCKET) == true) {
             ctx.flush()
         } else {
             super.channelReadComplete(ctx)
