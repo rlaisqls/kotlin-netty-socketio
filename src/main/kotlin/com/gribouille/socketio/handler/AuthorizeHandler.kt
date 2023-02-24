@@ -4,7 +4,7 @@ import com.gribouille.socketio.HandshakeData
 import com.gribouille.socketio.Configuration
 import com.gribouille.socketio.Disconnectable
 import com.gribouille.socketio.DisconnectableHub
-import com.gribouille.socketio.SocketIOClient
+import com.gribouille.socketio.Transport
 import com.gribouille.socketio.ack.AckManager
 import com.gribouille.socketio.messages.HttpErrorMessage
 import com.gribouille.socketio.namespace.Namespace
@@ -46,7 +46,7 @@ class AuthorizeHandler(
     storeFactory: StoreFactory,
     disconnectable: DisconnectableHub,
     ackManager: AckManager,
-    clientsBox: ClientsBox
+    clientsBox: ClientsBox,
 ) : ChannelInboundHandlerAdapter(), Disconnectable {
     private val scheduler: CancelableScheduler
     private val namespacesHub: NamespacesHub
@@ -84,28 +84,28 @@ class AuthorizeHandler(
 
     @Throws(Exception::class)
     override fun channelRead(ctx: ChannelHandlerContext, msg: Any) {
-        val key = SchedulerKey(Type.PING_TIMEOUT, ctx.channel())
-        scheduler.cancel(key)
+        scheduler.cancel(key = SchedulerKey(Type.PING_TIMEOUT, ctx.channel()))
+
         if (msg is FullHttpRequest) {
-            val req = msg as FullHttpRequest
-            val channel: Channel = ctx.channel()
-            val queryDecoder = QueryStringDecoder(req.uri())
-            if (!configuration.isAllowCustomRequests
-                && !queryDecoder.path().startsWith(connectPath)
-            ) {
-                val res: HttpResponse = DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.BAD_REQUEST)
-                channel.writeAndFlush(res).addListener(ChannelFutureListener.CLOSE)
-                req.release()
+            val channel = ctx.channel()
+            val queryDecoder = QueryStringDecoder(msg.uri())
+
+            if (!configuration.isAllowCustomRequests && !queryDecoder.path().startsWith(connectPath)) {
+                channel.writeAndFlush(
+                    DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.BAD_REQUEST)
+                ).addListener(ChannelFutureListener.CLOSE)
+                msg.release()
                 return
             }
-            val sid: MutableList<String>? = queryDecoder.parameters()["sid"]
+
+            val sid = queryDecoder.parameters()["sid"]
             if (queryDecoder.path() == connectPath && sid == null) {
-                val origin = req.headers().get(HttpHeaderNames.ORIGIN)
-                if (!authorize(ctx, channel, origin, queryDecoder.parameters(), req)) {
-                    req.release()
+                val origin = msg.headers().get(HttpHeaderNames.ORIGIN)
+                if (!authorize(ctx, channel, origin, queryDecoder.parameters(), msg)) {
+                    msg.release()
                     return
                 }
-                // forward message to polling or websocket handler to bind channel
+                // 메시지를 polling 혹은 websocket 핸들러에 전달하여 채널에 바인딩
             }
         }
         ctx.fireChannelRead(msg)
@@ -117,9 +117,9 @@ class AuthorizeHandler(
         channel: Channel,
         origin: String?,
         params: Map<String, List<String>>,
-        req: FullHttpRequest
+        req: FullHttpRequest,
     ): Boolean {
-        val headers: MutableMap<String, List<String>> = HashMap<String, List<String>>(req.headers().names().size)
+        val headers = HashMap<String, List<String>>(req.headers().names().size)
         for (name in req.headers().names()) {
             val values: List<String> = req.headers().getAll(name)
             headers[name] = values
@@ -130,34 +130,26 @@ class AuthorizeHandler(
             channel.localAddress() as InetSocketAddress,
             req.uri(), origin != null && !origin.equals("null", ignoreCase = true)
         )
-        var result = false
-        try {
-            result = configuration.authorizationListener.isAuthorized(data)
-        } catch (e: Exception) {
-            log.error("Authorization error", e)
-        }
-        if (!result) {
-            val res: HttpResponse = DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.UNAUTHORIZED)
+
+        if (!configuration.authorizationListener.isAuthorized(data)) {
+            val res = DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.UNAUTHORIZED)
             channel.writeAndFlush(res)
                 .addListener(ChannelFutureListener.CLOSE)
             log.debug("Handshake unauthorized, query params: {} headers: {}", params, headers)
             return false
         }
-        var sessionId: UUID? = null
-        sessionId = if (configuration.isRandomSession) {
+
+        val sessionId = if (configuration.isRandomSession) {
             UUID.randomUUID()
-        } else {
-            generateOrGetSessionIdFromRequest(req.headers())
-        }
-        val transportValue = params["transport"]
-        if (transportValue == null) {
+        } else generateOrGetSessionIdFromRequest(req.headers())
+
+        val transportValue = params["transport"] ?: run {
             log.error("Got no transports for request {}", req.uri())
             writeAndFlushTransportError(channel, origin)
             return false
         }
-        var transport: com.gribouille.socketio.Transport? = null
-        transport = try {
-            com.gribouille.socketio.Transport.valueOf(transportValue[0].uppercase(Locale.getDefault()))
+        val transport = try {
+            Transport.valueOf(transportValue[0].uppercase(Locale.getDefault()))
         } catch (e: IllegalArgumentException) {
             log.error("Unknown transport for request {}", req.uri())
             writeAndFlushTransportError(channel, origin)
@@ -175,25 +167,31 @@ class AuthorizeHandler(
             storeFactory = storeFactory,
             handshakeData = data,
             clientsBox = clientsBox,
-            currentTransport = transport!!,
+            currentTransport = transport,
             scheduler = scheduler,
             configuration = configuration
         )
-        channel.attr<ClientHead>(ClientHead.Companion.CLIENT).set(client)
+        channel.attr(ClientHead.CLIENT).set(client)
         clientsBox.addClient(client)
-        var transports = arrayOf<String>()
-        if (configuration.transports.contains(com.gribouille.socketio.Transport.WEBSOCKET)) {
-            transports = arrayOf("websocket")
+
+        val transports = if (configuration.transports.contains(Transport.WEBSOCKET)) {
+            arrayOf("websocket")
+        } else arrayOf()
+
+        with(client) {
+            val authPacket = AuthPacket(
+                sid = sessionId!!,
+                upgrades = transports,
+                pingInterval = configuration.pingInterval,
+                pingTimeout = configuration.pingTimeout
+            )
+            send(
+                packet = Packet(PacketType.OPEN)
+                    .apply { this.data = authPacket }
+            )
+            schedulePing()
+            schedulePingTimeout()
         }
-        val authPacket = AuthPacket(
-            sessionId!!, transports!!, configuration.pingInterval,
-            configuration.pingTimeout
-        )
-        val packet = Packet(PacketType.OPEN)
-        packet.data = authPacket
-        client.send(packet)
-        client.schedulePing()
-        client.schedulePingTimeout()
         log.debug("Handshake authorized for sessionId: {}, query params: {} headers: {}", sessionId, params, headers)
         return true
     }

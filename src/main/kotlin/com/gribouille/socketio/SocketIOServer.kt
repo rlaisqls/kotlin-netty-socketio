@@ -194,10 +194,6 @@ class SocketIOServer(configuration: Configuration) : ClientListeners {
         return configuration
     }
 
-    override fun addMultiTypeEventListener(eventName: String, listener: MultiTypeEventListener, vararg eventClass: Class<*>) {
-        mainNamespace.addMultiTypeEventListener(eventName, listener, *eventClass)
-    }
-
     override fun addEventListener(eventName: String, eventClass: Class<*>, listener: DataListener) {
         mainNamespace.addEventListener(eventName, eventClass, listener)
     }

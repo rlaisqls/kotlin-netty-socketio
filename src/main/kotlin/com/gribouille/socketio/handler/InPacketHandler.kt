@@ -48,7 +48,7 @@ class InPacketHandler(
                 }
                 val ns = namespacesHub[packet.nsp]
                 if (ns == null) {
-                    if (packet.subType === PacketType.CONNECT) {
+                    if (packet.subType == PacketType.CONNECT) {
                         val p = Packet(PacketType.MESSAGE)
                         p.subType = PacketType.ERROR
                         p.nsp = packet.nsp
@@ -63,7 +63,7 @@ class InPacketHandler(
                     )
                     return
                 }
-                if (packet.subType === PacketType.CONNECT) {
+                if (packet.subType == PacketType.CONNECT) {
                     client.addNamespaceClient(ns)
                 }
                 val nClient: NamespaceClient? = client.getChildClient(ns)

@@ -18,6 +18,7 @@ fun main() {
     configuration.socketConfig = socketConfig
 
     val socketServer = SocketIOServer(configuration)
+    socketServer.addListeners(TestClass())
 
     socketServer.start()
 }

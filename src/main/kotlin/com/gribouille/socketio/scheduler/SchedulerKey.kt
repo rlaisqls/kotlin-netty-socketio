@@ -23,6 +23,6 @@ open class SchedulerKey(private val type: Type?, private val sessionId: Any?) {
         if (sessionId == null) {
             if (other.sessionId != null) return false
         } else if (sessionId != other.sessionId) return false
-        return if (type != other.type) false else true
+        return type == other.type
     }
 }

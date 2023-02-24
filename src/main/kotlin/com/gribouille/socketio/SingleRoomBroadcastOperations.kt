@@ -1,7 +1,6 @@
 
 package com.gribouille.socketio
 
-import com.gribouille.socketio.misc.IterableCollection
 import com.gribouille.socketio.protocol.Packet
 import com.gribouille.socketio.protocol.PacketType
 import com.gribouille.socketio.store.StoreFactory

@@ -5,8 +5,8 @@ import com.gribouille.socketio.messages.HttpErrorMessage
 import com.gribouille.socketio.Configuration
 import com.gribouille.socketio.messages.HttpMessage
 import com.gribouille.socketio.messages.OutPacketMessage
-import com.gribouille.socketio.messages.XHROptionsMessage
-import com.gribouille.socketio.messages.XHRPostMessage
+import com.gribouille.socketio.messages.OptionsMessage
+import com.gribouille.socketio.messages.PostMessage
 import com.gribouille.socketio.protocol.PacketEncoder
 import io.netty.buffer.ByteBuf
 import io.netty.buffer.ByteBufOutputStream
@@ -70,7 +70,7 @@ class EncoderHandler(
         }
     }
 
-    private fun write(msg: XHROptionsMessage, ctx: ChannelHandlerContext, promise: ChannelPromise) {
+    private fun write(msg: OptionsMessage, ctx: ChannelHandlerContext, promise: ChannelPromise) {
         val res: HttpResponse = DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK)
         res.headers().add(HttpHeaderNames.SET_COOKIE, "io=" + msg.sessionId)
             .add(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE)
@@ -81,7 +81,7 @@ class EncoderHandler(
         sendMessage(msg, ctx.channel(), out, res, promise)
     }
 
-    private fun write(msg: XHRPostMessage, ctx: ChannelHandlerContext, promise: ChannelPromise) {
+    private fun write(msg: PostMessage, ctx: ChannelHandlerContext, promise: ChannelPromise) {
         val out = encoder.allocateBuffer(ctx.alloc())
         out.writeBytes(OK)
         sendMessage(msg, ctx.channel(), out, "text/html", promise, HttpResponseStatus.OK)
@@ -172,15 +172,15 @@ class EncoderHandler(
             return
         }
         if (msg is OutPacketMessage) {
-            if (msg.transport === com.gribouille.socketio.Transport.WEBSOCKET) {
+            if (msg.transport == com.gribouille.socketio.Transport.WEBSOCKET) {
                 handleWebsocket(msg, ctx, promise)
             }
-            if (msg.transport === com.gribouille.socketio.Transport.POLLING) {
+            if (msg.transport == com.gribouille.socketio.Transport.POLLING) {
                 handleHTTP(msg, ctx, promise)
             }
-        } else if (msg is XHROptionsMessage) {
+        } else if (msg is OptionsMessage) {
             write(msg, ctx, promise)
-        } else if (msg is XHRPostMessage) {
+        } else if (msg is PostMessage) {
             write(msg, ctx, promise)
         } else if (msg is HttpErrorMessage) {
             sendError(msg, ctx, promise)

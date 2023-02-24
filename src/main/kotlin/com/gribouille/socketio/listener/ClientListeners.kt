@@ -2,7 +2,6 @@
 package com.gribouille.socketio.listener
 
 interface ClientListeners {
-    fun addMultiTypeEventListener(eventName: String, listener: MultiTypeEventListener, vararg eventClass: Class<*>)
     fun addEventListener(eventName: String, eventClass: Class<*>, listener: DataListener)
     fun addEventInterceptor(eventInterceptor: EventInterceptor)
     fun addDisconnectListener(listener: DisconnectListener)

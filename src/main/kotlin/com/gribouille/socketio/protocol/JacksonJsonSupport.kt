@@ -27,7 +27,6 @@ import com.fasterxml.jackson.databind.ser.BeanSerializerModifier
 import com.fasterxml.jackson.databind.ser.std.StdSerializer
 import com.fasterxml.jackson.databind.type.ArrayType
 import com.gribouille.socketio.AckCallback
-import com.gribouille.socketio.MultiTypeAckCallback
 import com.gribouille.socketio.namespace.Namespace
 import io.netty.buffer.ByteBufInputStream
 import io.netty.buffer.ByteBufOutputStream
@@ -71,7 +70,7 @@ class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
         override fun deserialize(jp: JsonParser, ctxt: DeserializationContext?): AckArgs {
             val args: MutableList<Any> = ArrayList()
             val result = AckArgs(args)
-            val mapper = jp.getCodec() as ObjectMapper
+            val mapper = jp.codec as ObjectMapper
             val root: JsonNode = mapper.readTree(jp)
             val callback = currentAckClass.get()
             val iter: Iterator<JsonNode> = root.iterator()
@@ -79,12 +78,9 @@ class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
             while (iter.hasNext()) {
                 var value: Any
                 var clazz: Class<*> = callback.resultClass
-                if (callback is MultiTypeAckCallback) {
-                    val multiTypeAckCallback: MultiTypeAckCallback = callback as MultiTypeAckCallback
-                    clazz = multiTypeAckCallback.resultClasses.get(i)
-                }
+
                 val arg: JsonNode = iter.next()
-                if (arg.isTextual() || arg.isBoolean()) {
+                if (arg.isTextual || arg.isBoolean) {
                     clazz = Any::class.java
                 }
                 value = mapper.treeToValue(arg, clazz)
@@ -105,7 +101,7 @@ class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
         }
 
         override fun equals(obj: Any?): Boolean {
-            if (this === obj) return true
+            if (this == obj) return true
             if (obj == null) return false
             if (javaClass != obj.javaClass) return false
             val other = obj as EventKey
@@ -119,14 +115,14 @@ class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
         }
     }
 
-    inner class EventDeserializer : StdDeserializer<Event?>(
-        Event::class.java
-    ) {
+    inner class EventDeserializer : StdDeserializer<Event?>(Event::class.java) {
         val eventMapping: MutableMap<EventKey, List<Class<*>>> = ConcurrentHashMap()
 
         override fun deserialize(jp: JsonParser, ctxt: DeserializationContext?): Event {
-            val mapper: ObjectMapper = jp.getCodec() as ObjectMapper
+            println("EventDeserializer.deserialize")
+            val mapper = jp.codec as ObjectMapper
             val eventName: String = jp.nextTextValue()
+
             var ek = EventKey(namespaceClass.get(), eventName)
             if (!eventMapping.containsKey(ek)) {
                 ek = EventKey(Namespace.DEFAULT_NAME, eventName)
@@ -139,8 +135,8 @@ class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
             val eventClasses = eventMapping[ek]!!
             var i = 0
             while (true) {
-                val token: JsonToken = jp.nextToken()
-                if (token === JsonToken.END_ARRAY) {
+                val token = jp.nextToken()
+                if (token == JsonToken.END_ARRAY) {
                     break
                 }
                 if (i > eventClasses.size - 1) {
@@ -148,7 +144,10 @@ class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
                     break
                 }
                 val eventClass = eventClasses[i]
-                val arg: Any = mapper.readValue(jp, eventClass)
+
+                println("EventDeserializer.deserialize")
+                println(jp.valueAsString)
+                val arg = mapper.readValue(jp, eventClass)
                 eventArgs.add(arg)
                 i++
             }
@@ -163,7 +162,7 @@ class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
         }
 
         override fun isEmpty(value: ByteArray?): Boolean {
-            return value == null || value.size == 0
+            return value == null || value.isEmpty()
         }
 
         override fun serialize(value: ByteArray?, jgen: JsonGenerator?, provider: SerializerProvider?) {
@@ -184,8 +183,8 @@ class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
         }
 
         override fun getSchema(provider: SerializerProvider?, typeHint: Type?): JsonNode {
-            val o: ObjectNode = createSchemaNode("array", true)
-            val itemSchema: ObjectNode = createSchemaNode("string") //binary values written as strings?
+            val o = createSchemaNode("array", true)
+            val itemSchema = createSchemaNode("string") //binary values written as strings?
             return o.set("items", itemSchema)
         }
 
@@ -243,7 +242,7 @@ class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
         valueType: Class<T>
     ): T {
         namespaceClass.set(namespaceName)
-        return objectMapper.readValue(src as InputStream?, valueType)
+        return objectMapper.readValue(src as InputStream, valueType)
     }
 
     override fun readAckArgs(

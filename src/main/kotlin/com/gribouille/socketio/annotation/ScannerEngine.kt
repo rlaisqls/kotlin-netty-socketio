@@ -2,9 +2,6 @@ package com.gribouille.socketio.annotation
 
 import com.gribouille.socketio.namespace.Namespace
 import org.slf4j.LoggerFactory
-import java.lang.reflect.Method
-import java.lang.reflect.Modifier
-import java.util.*
 
 class ScannerEngine {
 

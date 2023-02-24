@@ -6,8 +6,8 @@ import com.gribouille.socketio.handler.ClientHead
 import com.gribouille.socketio.handler.ClientsBox
 import com.gribouille.socketio.handler.EncoderHandler
 import com.gribouille.socketio.messages.PacketsMessage
-import com.gribouille.socketio.messages.XHROptionsMessage
-import com.gribouille.socketio.messages.XHRPostMessage
+import com.gribouille.socketio.messages.OptionsMessage
+import com.gribouille.socketio.messages.PostMessage
 import com.gribouille.socketio.protocol.PacketDecoder
 import io.netty.buffer.ByteBuf
 import io.netty.channel.Channel
@@ -93,7 +93,7 @@ class PollingTransport(
         if (queryDecoder.parameters().containsKey("disconnect")) {
             val client = clientsBox[sessionId]!!
             client.onChannelDisconnect()
-            ctx.channel().writeAndFlush(XHRPostMessage(origin, sessionId))
+            ctx.channel().writeAndFlush(PostMessage(origin, sessionId))
         } else {
             when (req.method()) {
                 HttpMethod.POST -> {
@@ -120,7 +120,7 @@ class PollingTransport(
             sendError(ctx)
             return
         }
-        ctx.channel().writeAndFlush(XHROptionsMessage(origin, sessionId))
+        ctx.channel().writeAndFlush(OptionsMessage(origin, sessionId))
     }
 
     @Throws(IOException::class)
@@ -138,7 +138,7 @@ class PollingTransport(
         }
 
         // 메시지 처리 전 POST 응답 release
-        ctx.channel().writeAndFlush(XHRPostMessage(origin, sessionId))
+        ctx.channel().writeAndFlush(PostMessage(origin, sessionId))
         val b64 = ctx.channel().attr(EncoderHandler.B64).get()
         if (b64 == true) {
             val jsonIndex = ctx.channel().attr(EncoderHandler.JSONP_INDEX).get()

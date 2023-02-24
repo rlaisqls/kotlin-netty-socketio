@@ -4,7 +4,6 @@ import com.gribouille.socketio.AckMode
 import com.gribouille.socketio.AckRequest
 import com.gribouille.socketio.BroadcastOperations
 import com.gribouille.socketio.Configuration
-import com.gribouille.socketio.MultiTypeArgs
 import com.gribouille.socketio.SingleRoomBroadcastOperations
 import com.gribouille.socketio.SocketIOClient
 import com.gribouille.socketio.SocketIONamespace
@@ -14,7 +13,6 @@ import com.gribouille.socketio.listener.DataListener
 import com.gribouille.socketio.listener.DisconnectListener
 import com.gribouille.socketio.listener.EventInterceptor
 import com.gribouille.socketio.listener.ExceptionListener
-import com.gribouille.socketio.listener.MultiTypeEventListener
 import com.gribouille.socketio.listener.PingListener
 import com.gribouille.socketio.listener.PongListener
 import com.gribouille.socketio.protocol.JsonSupport
@@ -54,16 +52,6 @@ class Namespace(
         clients[client.sessionId] = client
     }
 
-    override fun addMultiTypeEventListener(
-        eventName: String,
-        listener: MultiTypeEventListener,
-        vararg eventClass: Class<*>
-    ) {
-        val entry = eventListeners[eventName] ?: EventEntry().also { eventListeners.putIfAbsent(eventName, it) }
-        entry.addListener(listener)
-        jsonSupport.addEventMapping(name, eventName, *eventClass)
-    }
-
     override fun removeAllListeners(eventName: String) {
         val entry = eventListeners.remove(eventName)
         if (entry != null) {
@@ -91,7 +79,7 @@ class Namespace(
         args: List<Any>,
         ackRequest: AckRequest
     ) {
-        val entry = eventListeners.get(eventName) ?: return
+        val entry = eventListeners[eventName] ?: return
         try {
             val listeners: Queue<DataListener> = entry.listeners
             for (dataListener in listeners) {
@@ -103,7 +91,7 @@ class Namespace(
             }
         } catch (e: Exception) {
             exceptionListener.onEventException(e, args, client)
-            if (ackMode === AckMode.AUTO_SUCCESS_ONLY) {
+            if (ackMode == AckMode.AUTO_SUCCESS_ONLY) {
                 return
             }
         }
@@ -111,8 +99,8 @@ class Namespace(
     }
 
     private fun sendAck(ackRequest: AckRequest) {
-        if (ackMode === AckMode.AUTO || ackMode === AckMode.AUTO_SUCCESS_ONLY) {
-            // send ack response if it not executed
+        if (ackMode == AckMode.AUTO || ackMode == AckMode.AUTO_SUCCESS_ONLY) {
+            // send ack response if it is not executed
             // during {@link DataListener#onData} invocation
             ackRequest.sendAckData(emptyList())
         }
@@ -122,12 +110,8 @@ class Namespace(
         args: List<Any>,
         dataListener: DataListener
     ): Any {
-        if (dataListener is MultiTypeEventListener) {
-            return MultiTypeArgs(args)
-        } else if (args.isNotEmpty()) {
-            return args[0]
-
-        } else error("")
+        require(args.isNotEmpty())
+        return args[0]
     }
 
     override fun addDisconnectListener(listener: DisconnectListener) {
@@ -200,24 +184,6 @@ class Namespace(
 
     override fun getRoomOperations(room: String): BroadcastOperations {
         return SingleRoomBroadcastOperations(getRoomClients(room).toList(), name, room, storeFactory)
-    }
-
-    override fun hashCode(): Int {
-        val prime = 31
-        var result = 1
-        result = prime * result + (name?.hashCode() ?: 0)
-        return result
-    }
-
-    override fun equals(obj: Any?): Boolean {
-        if (this === obj) return true
-        if (obj == null) return false
-        if (javaClass != obj.javaClass) return false
-        val other = obj as Namespace
-        if (name == null) {
-            if (other.name != null) return false
-        } else if (name != other.name) return false
-        return true
     }
 
     override fun addListeners(listeners: Any) {

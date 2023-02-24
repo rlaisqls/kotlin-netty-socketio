@@ -74,7 +74,7 @@ class SocketIOChannelInitializer : ChannelInitializer<Channel>(), Disconnectable
         )
         xhrPollingTransport = PollingTransport(decoder, authorizeHandler!!, clientsBox)
         webSocketTransport = WebSocketTransport(authorizeHandler!!, configuration, scheduler, clientsBox)
-        val packetListener = PacketListener(namespacesHub, ackManager!!, scheduler, xhrPollingTransport!!)
+        val packetListener = PacketListener(namespacesHub, ackManager!!, scheduler)
         packetHandler = InPacketHandler(packetListener, decoder, namespacesHub, configuration.exceptionListener)
         try {
             encoderHandler = EncoderHandler(configuration, encoder)
