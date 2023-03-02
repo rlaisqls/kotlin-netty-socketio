@@ -114,7 +114,7 @@ class PollingTransport(
     }
 
     private fun onOptions(sessionId: UUID, ctx: ChannelHandlerContext, origin: String) {
-        val client: ClientHead? = clientsBox.get(sessionId)
+        val client: ClientHead? = clientsBox[sessionId]
         if (client == null) {
             log.error("{} is not registered. Closing connection", sessionId)
             sendError(ctx)
@@ -130,7 +130,6 @@ class PollingTransport(
         origin: String,
         content: ByteBuf
     ) {
-        var content: ByteBuf = content
         val client = clientsBox[sessionId] ?: run {
             log.error("{} is not registered. Closing connection", sessionId)
             sendError(ctx)
@@ -139,6 +138,8 @@ class PollingTransport(
 
         // 메시지 처리 전 POST 응답 release
         ctx.channel().writeAndFlush(PostMessage(origin, sessionId))
+
+        var content = content
         val b64 = ctx.channel().attr(EncoderHandler.B64).get()
         if (b64 == true) {
             val jsonIndex = ctx.channel().attr(EncoderHandler.JSONP_INDEX).get()
@@ -154,7 +155,7 @@ class PollingTransport(
     }
 
     protected fun onGet(sessionId: UUID?, ctx: ChannelHandlerContext, origin: String?) {
-        val client: ClientHead? = clientsBox.get(sessionId)
+        val client = clientsBox[sessionId]
         if (client == null) {
             log.error("{} is not registered. Closing connection", sessionId)
             sendError(ctx)
@@ -171,8 +172,8 @@ class PollingTransport(
 
     @Throws(Exception::class)
     override fun channelInactive(ctx: ChannelHandlerContext) {
-        val channel: Channel = ctx.channel()
-        val client: ClientHead? = clientsBox.get(channel)
+        val channel = ctx.channel()
+        val client = clientsBox[channel]
         if (client != null && client.isTransportChannel(ctx.channel(), Transport.POLLING)) {
             log.debug("channel inactive {}", client.sessionId)
             client.releasePollingChannel(channel)

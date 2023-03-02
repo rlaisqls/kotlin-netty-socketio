@@ -12,10 +12,16 @@ internal class JsonSupportWrapper(
     private val delegate: JsonSupport
 ) : JsonSupport {
 
+    override val arrays: List<ByteArray>
+        get() = delegate.arrays
+
     @Throws(IOException::class)
-    override fun readAckArgs(src: ByteBufInputStream, callback: AckCallback): AckArgs {
+    override fun readAckArgs(
+        src: ByteBufInputStream,
+        callback: AckCallback
+    ): AckArgs {
         return try {
-            delegate!!.readAckArgs(src, callback)
+            delegate.readAckArgs(src, callback)
         } catch (e: Exception) {
             src.reset()
             log.error("Can't read ack args: " + src.readLine() + " for type: " + callback.resultClass, e)
@@ -24,7 +30,11 @@ internal class JsonSupportWrapper(
     }
 
     @Throws(IOException::class)
-    override fun <T> readValue(namespaceName: String, src: ByteBufInputStream, valueType: Class<T>): T {
+    override fun <T> readValue(
+        namespaceName: String,
+        src: ByteBufInputStream,
+        valueType: Class<T>,
+    ): T {
         return try {
             delegate.readValue(namespaceName, src, valueType)
         } catch (e: Exception) {
@@ -35,7 +45,10 @@ internal class JsonSupportWrapper(
     }
 
     @Throws(IOException::class)
-    override fun writeValue(out: ByteBufOutputStream, value: Any) {
+    override fun writeValue(
+        out: ByteBufOutputStream,
+        value: Any,
+    ) {
         try {
             delegate.writeValue(out, value)
         } catch (e: Exception) {
@@ -51,9 +64,6 @@ internal class JsonSupportWrapper(
     override fun removeEventMapping(namespaceName: String, eventName: String) {
         delegate.removeEventMapping(namespaceName, eventName)
     }
-
-    override val arrays: List<ByteArray>
-        get() = delegate.arrays
 
     companion object {
         private val log = LoggerFactory.getLogger(JsonSupportWrapper::class.java)

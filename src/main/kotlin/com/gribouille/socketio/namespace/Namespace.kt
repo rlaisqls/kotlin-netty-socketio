@@ -29,24 +29,32 @@ class Namespace(
     configuration: Configuration
 ) : SocketIONamespace {
     private val engine = ScannerEngine()
-    private val eventListeners: ConcurrentMap<String, EventEntry> = ConcurrentHashMap()
-    private val connectListeners: Queue<ConnectListener> = ConcurrentLinkedQueue()
-    private val disconnectListeners: Queue<DisconnectListener> = ConcurrentLinkedQueue()
-    private val pingListeners: Queue<PingListener> = ConcurrentLinkedQueue()
-    private val pongListeners: Queue<PongListener> = ConcurrentLinkedQueue()
-    private val eventInterceptors: Queue<EventInterceptor> = ConcurrentLinkedQueue()
-    private val roomClients: ConcurrentMap<String, MutableSet<UUID>> = ConcurrentHashMap()
-    private val clientRooms: ConcurrentMap<UUID, MutableSet<String>> = ConcurrentHashMap()
+    private val eventListeners = ConcurrentHashMap<String, EventEntry>()
+    private val connectListeners = ConcurrentLinkedQueue<ConnectListener>()
+    private val disconnectListeners = ConcurrentLinkedQueue<DisconnectListener>()
+    private val pingListeners = ConcurrentLinkedQueue<PingListener>()
+    private val pongListeners = ConcurrentLinkedQueue<PongListener>()
+    private val eventInterceptors = ConcurrentLinkedQueue<EventInterceptor>()
+    private val roomClients = ConcurrentHashMap<String, MutableSet<UUID>>()
+    private val clientRooms = ConcurrentHashMap<UUID, MutableSet<String>>()
     private val ackMode: AckMode = configuration.ackMode
-    private val jsonSupport: JsonSupport = configuration.jsonSupport!!
-    private val storeFactory: StoreFactory = configuration.storeFactory
-    private val exceptionListener: ExceptionListener = configuration.exceptionListener
+    private val jsonSupport = configuration.jsonSupport!!
+    private val storeFactory = configuration.storeFactory
+    private val exceptionListener = configuration.exceptionListener
 
     private val clients: MutableMap<UUID, SocketIOClient> = ConcurrentHashMap()
     override val allClients: Collection<SocketIOClient>
         get() = clients.values
+
     val rooms: Set<String>
         get() = roomClients.keys.toSet()
+
+    override val broadcastOperations: BroadcastOperations
+        get() = SingleRoomBroadcastOperations(clients.values, name, name, storeFactory)
+
+    override fun getRoomOperations(room: String): BroadcastOperations {
+        return SingleRoomBroadcastOperations(getRoomClients(room).toList(), name, room, storeFactory)
+    }
 
     fun addClient(client: SocketIOClient) {
         clients[client.sessionId] = client
@@ -100,8 +108,7 @@ class Namespace(
 
     private fun sendAck(ackRequest: AckRequest) {
         if (ackMode == AckMode.AUTO || ackMode == AckMode.AUTO_SUCCESS_ONLY) {
-            // send ack response if it is not executed
-            // during {@link DataListener#onData} invocation
+            // {@link DataListener#onData}가 호출되는 동안 ack 응답이 전송되지 않는 경우 전송
             ackRequest.sendAckData(emptyList())
         }
     }
@@ -122,7 +129,7 @@ class Namespace(
         val joinedRooms = client.allRooms
         clients.remove(client.sessionId)
 
-        // client must leave all rooms and publish the leave msg one by one on disconnect.
+        // client가 disconnect 될때, 모든 방에서 leave한다.
         for (joinedRoom in joinedRooms) {
             leave(roomClients, joinedRoom, client.sessionId)
         }
@@ -177,13 +184,6 @@ class Namespace(
         } catch (e: Exception) {
             exceptionListener.onPingException(e, client)
         }
-    }
-
-    override val broadcastOperations: BroadcastOperations
-        get() = SingleRoomBroadcastOperations(clients.values, name, name, storeFactory)
-
-    override fun getRoomOperations(room: String): BroadcastOperations {
-        return SingleRoomBroadcastOperations(getRoomClients(room).toList(), name, room, storeFactory)
     }
 
     override fun addListeners(listeners: Any) {
@@ -245,7 +245,7 @@ class Namespace(
         }
     }
 
-    fun leave(room: String, sessionId: UUID) {
+    private fun leave(room: String, sessionId: UUID) {
         leave(roomClients, room, sessionId)
         leave(clientRooms, sessionId, room)
     }

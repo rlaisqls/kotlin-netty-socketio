@@ -1,18 +1,9 @@
 
-/**
- * Modified version of HashedWheelScheduler specially for timeouts handling.
- * Difference:
- * - handling old timeout with same key after adding new one
- * fixes multithreaded problem that appears in highly concurrent non-atomic sequence cancel() -> schedule()
- *
- * (c) Alim Akbashev, 2015-02-11
- */
 package com.gribouille.socketio.scheduler
 
 import io.netty.channel.ChannelHandlerContext
 import io.netty.util.HashedWheelTimer
 import io.netty.util.Timeout
-import io.netty.util.internal.PlatformDependent
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ThreadFactory
 import java.util.concurrent.TimeUnit
@@ -89,16 +80,14 @@ class HashedWheelTimeoutScheduler : CancelableScheduler {
     }
 
     private fun replaceScheduledFuture(key: SchedulerKey, newTimeout: Timeout) {
-        val oldTimeout: Timeout?
-        oldTimeout = if (newTimeout.isExpired) {
-            // no need to put already expired timeout to scheduledFutures map.
-            // simply remove old timeout
+        val oldTimeout = if (newTimeout.isExpired) {
+            // 이미 expired 된 timeout이 들어온 경우 정보를 지운다.
             scheduledFutures.remove(key)
         } else {
             scheduledFutures.put(key, newTimeout)
         }
 
-        // if there was old timeout, cancel it
+        // 동일한 키에 대한 timeout이 이미 존재한다면 취소한다.
         oldTimeout?.cancel()
     }
 }

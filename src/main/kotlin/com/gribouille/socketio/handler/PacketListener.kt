@@ -28,8 +28,7 @@ class PacketListener(
         when (packet.type) {
 
             PacketType.PING -> {
-                val outPacket = Packet(PacketType.PONG)
-                outPacket.data = packet.data
+                val outPacket = Packet(PacketType.PONG).apply { data = packet.data }
                 client.baseClient.send(outPacket, transport)
                 if ("probe" == packet.data) {
                     client.baseClient.send(Packet(PacketType.NOOP), Transport.POLLING)
@@ -69,8 +68,7 @@ class PacketListener(
                         ackManager.onAck(client, packet)
                     }
                     PacketType.EVENT, PacketType.BINARY_EVENT -> {
-                        val namespace = namespacesHub[packet.nsp]
-                        namespace.onEvent(
+                        namespacesHub[packet.nsp].onEvent(
                             client = client,
                             eventName = packet.name!!,
                             args = packet.data?.let { it as List<Any> } ?: emptyList(),

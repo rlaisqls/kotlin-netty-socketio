@@ -4,21 +4,11 @@ package com.gribouille.socketio.protocol
 import io.netty.buffer.ByteBuf
 
 class UTF8CharsScanner {
-    private fun getCharTailIndex(inputBuffer: ByteBuf, i: Int): Int {
-        var i = i
-        val c = inputBuffer.getByte(i).toInt() and 0xFF
-        when (sInputCodesUtf8[c]) {
-            2 -> i += 2
-            3 -> i += 3
-            4 -> i += 4
-            else -> i++
-        }
-        return i
-    }
 
     fun getActualLength(inputBuffer: ByteBuf, length: Int): Int {
         var len = 0
         val start = inputBuffer.readerIndex()
+
         var i = inputBuffer.readerIndex()
         while (i < inputBuffer.readableBytes() + inputBuffer.readerIndex()) {
             i = getCharTailIndex(inputBuffer, i)
@@ -30,31 +20,36 @@ class UTF8CharsScanner {
         throw IllegalStateException()
     }
 
+    private fun getCharTailIndex(inputBuffer: ByteBuf, i: Int): Int {
+        var idx = i
+        val c = inputBuffer.getByte(i).toInt() and 0xFF
+        when (sInputCodesUtf8[c]) {
+            2 -> idx += 2
+            3 -> idx += 3
+            4 -> idx += 4
+            else -> idx++
+        }
+        return idx
+    }
+
     companion object {
         /**
-         * Lookup table used for determining which input characters need special
-         * handling when contained in text segment.
+         * 텍스트 세그먼트에 특수 처리가 필요한 입력 문자가 포함될때 사용하는 lockup table
          */
-        val sInputCodes: IntArray
-
-        init {
-            /*
-         * 96 would do for most cases (backslash is ascii 94) but if we want to
-         * do lookups by raw bytes it's better to have full table
-         */
+        private val sInputCodes: IntArray = let {
             val table = IntArray(256)
-            // Control chars and non-space white space are not allowed unquoted
+            // Control chars와 space가 아닌 공백은 따옴표 없이 사용할 수 없다.
             for (i in 0..31) {
                 table[i] = -1
             }
-            // And then string end and quote markers are special too
+            // string end와 따옴표 처리
             table['"'.code] = 1
             table['\\'.code] = 1
-            sInputCodes = table
+            table
         }
 
         /**
-         * Additionally we can combine UTF-8 decoding info into similar data table.
+         * UTF-8 decoding에 추가적으로 필요한 lockup table
          */
         val sInputCodesUtf8: IntArray
 
@@ -62,20 +57,13 @@ class UTF8CharsScanner {
             val table = IntArray(sInputCodes.size)
             System.arraycopy(sInputCodes, 0, table, 0, sInputCodes.size)
             for (c in 128..255) {
-                var code: Int
 
-                // We'll add number of bytes needed for decoding
-                code = if (c and 0xE0 == 0xC0) { // 2 bytes (0x0080 - 0x07FF)
-                    2
-                } else if (c and 0xF0 == 0xE0) { // 3 bytes (0x0800 - 0xFFFF)
-                    3
-                } else if (c and 0xF8 == 0xF0) {
-                    // 4 bytes; double-char with surrogates and all...
-                    4
-                } else {
-                    // And -1 seems like a good "universal" error marker...
-                    -1
-                }
+                // decoding에 필요한 바이트 수를 나타낸다.
+                val code = if (c and 0xE0 == 0xC0) 2 // 2 bytes (0x0080 - 0x07FF)
+                else if (c and 0xF0 == 0xE0) 3 // 3 bytes (0x0800 - 0xFFFF)
+                else if (c and 0xF8 == 0xF0) 4 // 4 bytes; double-char with surrogates and all...
+                else -1 // error marker
+
                 table[c] = code
             }
             sInputCodesUtf8 = table
