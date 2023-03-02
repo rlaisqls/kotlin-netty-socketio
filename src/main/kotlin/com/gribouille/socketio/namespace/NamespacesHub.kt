@@ -5,20 +5,16 @@ import com.gribouille.socketio.Configuration
 import com.gribouille.socketio.SocketIOClient
 import com.gribouille.socketio.SocketIONamespace
 import com.gribouille.socketio.misc.CompositeIterable
-import io.netty.util.internal.PlatformDependent
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentMap
 
 class NamespacesHub(
-    configuration: Configuration
+    private val configuration: Configuration
 ) {
     private val namespaces: ConcurrentMap<String, SocketIONamespace> = ConcurrentHashMap()
-    private val configuration: Configuration
+
     val allNamespaces: Collection<SocketIONamespace>
         get() = namespaces.values
-    init {
-        this.configuration = configuration
-    }
 
     fun create(name: String) =
         namespaces[name] ?: Namespace(name, configuration).also { namespaces.putIfAbsent(name, it) }

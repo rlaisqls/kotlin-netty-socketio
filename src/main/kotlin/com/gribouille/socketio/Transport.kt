@@ -5,6 +5,6 @@ import com.gribouille.socketio.transport.PollingTransport
 import com.gribouille.socketio.transport.WebSocketTransport
 
 enum class Transport(val value: String) {
-    WEBSOCKET(WebSocketTransport.NAME), POLLING(PollingTransport.NAME)
-
+    WEBSOCKET(WebSocketTransport.NAME),
+    POLLING(PollingTransport.NAME)
 }

@@ -4,10 +4,6 @@ package com.gribouille.socketio
 import com.gribouille.socketio.listener.ClientListeners
 import java.util.*
 
-/**
- * Fully thread-safe.
- *
- */
 interface SocketIONamespace : ClientListeners {
     val name: String
     val broadcastOperations: BroadcastOperations?

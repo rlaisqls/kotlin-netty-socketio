@@ -8,8 +8,6 @@ interface ExceptionListener {
     fun onEventException(e: Exception, args: List<Any?>?, client: SocketIOClient?)
     fun onDisconnectException(e: Exception, client: SocketIOClient?)
     fun onConnectException(e: Exception, client: SocketIOClient?)
-
-    @Deprecated("")
     fun onPingException(e: Exception, client: SocketIOClient?)
     fun onPongException(e: Exception, client: SocketIOClient?)
 

@@ -7,7 +7,7 @@ import java.util.*
 import java.util.concurrent.ConcurrentLinkedQueue
 
 class TransportState {
-    var packetsQueue: Queue<Packet?>? = ConcurrentLinkedQueue<Packet>()
+    var packetsQueue = ConcurrentLinkedQueue<Packet>()
     var channel: Channel? = null
         private set
 

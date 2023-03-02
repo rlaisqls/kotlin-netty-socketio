@@ -6,12 +6,7 @@ import com.gribouille.socketio.store.Store
 import java.net.SocketAddress
 import java.util.*
 
-/**
- * Fully thread-safe.
- *
- */
 interface SocketIOClient : ClientOperations, Store {
-
     val handshakeData: HandshakeData?
     val transport: Transport?
     val namespace: SocketIONamespace?

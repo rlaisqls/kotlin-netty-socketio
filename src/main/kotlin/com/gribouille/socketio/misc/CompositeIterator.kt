@@ -5,6 +5,7 @@ class CompositeIterator<T>(
     private val listIterator: Iterator<MutableIterator<T>>
 ) : MutableIterator<T> {
     private var currentIterator: MutableIterator<T>? = null
+
     override fun hasNext(): Boolean {
         if (currentIterator == null || !currentIterator!!.hasNext()) {
             while (listIterator.hasNext()) {
