@@ -101,7 +101,7 @@ class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
         }
 
         override fun equals(obj: Any?): Boolean {
-            if (this == obj) return true
+            if (this === obj) return true
             if (obj == null) return false
             if (javaClass != obj.javaClass) return false
             val other = obj as EventKey
@@ -119,7 +119,6 @@ class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
         val eventMapping: MutableMap<EventKey, List<Class<*>>> = ConcurrentHashMap()
 
         override fun deserialize(jp: JsonParser, ctxt: DeserializationContext?): Event {
-            println("EventDeserializer.deserialize")
             val mapper = jp.codec as ObjectMapper
             val eventName: String = jp.nextTextValue()
 
@@ -144,9 +143,6 @@ class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
                     break
                 }
                 val eventClass = eventClasses[i]
-
-                println("EventDeserializer.deserialize")
-                println(jp.valueAsString)
                 val arg = mapper.readValue(jp, eventClass)
                 eventArgs.add(arg)
                 i++

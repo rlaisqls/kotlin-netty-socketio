@@ -89,7 +89,7 @@ class Namespace(
     ) {
         val entry = eventListeners[eventName] ?: return
         try {
-            val listeners: Queue<DataListener> = entry.listeners
+            val listeners = entry.listeners
             for (dataListener in listeners) {
                 val data = getEventData(args, dataListener)
                 dataListener.onData(client, data, ackRequest)

@@ -1,4 +1,4 @@
-package com.gribouille.socketio.test
+package test
 
 import com.gribouille.socketio.Configuration
 import com.gribouille.socketio.SocketConfig

@@ -6,6 +6,7 @@ import com.gribouille.socketio.handler.SocketIOException
 import com.gribouille.socketio.listener.ConnectListener
 import com.gribouille.socketio.listener.DataListener
 import com.gribouille.socketio.namespace.Namespace
+import com.gribouille.socketio.protocol.Event
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 
@@ -43,8 +44,9 @@ object SocketAnnotationScanner {
         val annotation = annot as OnEvent
         require(annotation.value.trim { it <= ' ' }.isNotEmpty()) { "OnEvent \"value\" parameter is required" }
 
+
         val requestType = getDataType(method)
-        namespace.addEventListener(annotation.value, requestType, object : DataListener {
+        namespace.addEventListener(annotation.value, Event::class.java, object : DataListener {
             override fun onData(client: SocketIOClient, data: Any, ackSender: AckRequest) {
                 try {
                     val args: MutableList<Any> = ArrayList()
