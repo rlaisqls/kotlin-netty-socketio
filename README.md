@@ -9,7 +9,7 @@
 
 ## class diagram
 
-![image](https://github.com/rlaisqls/gribouille/assets/81006587/2333e826-d2dd-4be6-a190-817c96734ee3)
+![DisconnectableHub](https://github.com/rlaisqls/gribouille/assets/81006587/7e70c549-6f2f-4573-bf51-223cd04281db)
 
 ## 배운점 정리
 
