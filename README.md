@@ -7,6 +7,10 @@
 - netty 라이브러리를 직접 사용해봄으로써 낮은 추상화 수준의 자바 네트워킹 경험해보기
 - java 코드를 kotlin으로 변환하며 마이그레이션 및 큰 리팩토링 경험해보기
 
+## class diagram
+
+![image](https://github.com/rlaisqls/gribouille/assets/81006587/2333e826-d2dd-4be6-a190-817c96734ee3)
+
 ## 배운점 정리
 
 - [netty 서버 예제](https://github.com/rlaisqls/TIL/blob/main/%EA%B0%9C%EB%B0%9C/netty/netty%E2%80%85server%E2%80%85%EC%98%88%EC%A0%9C.md)
