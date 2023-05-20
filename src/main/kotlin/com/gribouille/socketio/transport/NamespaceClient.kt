@@ -44,7 +44,7 @@ class NamespaceClient(
 
     override fun sendEvent(
         name: String,
-        vararg data: Any
+        data: Any
     ) {
         val packet = Packet(PacketType.MESSAGE)
         packet.subType = PacketType.EVENT
@@ -56,7 +56,7 @@ class NamespaceClient(
     override fun sendEvent(
         name: String,
         ackCallback: AckCallback,
-        vararg data: Any
+        data: Any
     ) {
         val packet = Packet(PacketType.MESSAGE)
         packet.subType = PacketType.EVENT
@@ -80,10 +80,8 @@ class NamespaceClient(
     }
 
     override fun send(packet: Packet) {
-        if (!isConnected) {
-            return
-        }
-        baseClient.send(packet.withNsp(namespace.name))
+        if (!isConnected) return
+        baseClient.send(packet.withNsp(namespace.name))?.get()
     }
 
     fun onDisconnect() {
