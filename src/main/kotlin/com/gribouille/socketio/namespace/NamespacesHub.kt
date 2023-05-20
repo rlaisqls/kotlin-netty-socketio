@@ -27,8 +27,8 @@ class NamespacesHub(
         return CompositeIterable(allClients.toList())
     }
 
-    operator fun get(name: String?): Namespace {
-        return namespaces[name] as Namespace
+    operator fun get(name: String?): Namespace? {
+        return namespaces[name] as Namespace?
     }
 
     fun remove(name: String?) {

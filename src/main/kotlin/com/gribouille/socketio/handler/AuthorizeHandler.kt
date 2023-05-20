@@ -40,35 +40,19 @@ import java.util.concurrent.TimeUnit
 @Sharable
 class AuthorizeHandler(
     private val connectPath: String,
-    scheduler: CancelableScheduler,
+    private val scheduler: CancelableScheduler,
     private val configuration: Configuration,
-    namespacesHub: NamespacesHub,
-    storeFactory: StoreFactory,
-    disconnectable: DisconnectableHub,
-    ackManager: AckManager,
-    clientsBox: ClientsBox,
-) : ChannelInboundHandlerAdapter(), Disconnectable {
-    private val scheduler: CancelableScheduler
-    private val namespacesHub: NamespacesHub
-    private val storeFactory: StoreFactory
-    private val disconnectable: DisconnectableHub
-    private val ackManager: AckManager
+    private val namespacesHub: NamespacesHub,
+    private val storeFactory: StoreFactory,
+    private val disconnectable: DisconnectableHub,
+    private val ackManager: AckManager,
     private val clientsBox: ClientsBox
-
-    init {
-        this.scheduler = scheduler
-        this.namespacesHub = namespacesHub
-        this.storeFactory = storeFactory
-        this.disconnectable = disconnectable
-        this.ackManager = ackManager
-        this.clientsBox = clientsBox
-    }
+) : ChannelInboundHandlerAdapter(), Disconnectable {
 
     @Throws(Exception::class)
     override fun channelActive(ctx: ChannelHandlerContext) {
-        val key = SchedulerKey(Type.PING_TIMEOUT, ctx.channel())
         scheduler.schedule(
-            key = key,
+            key = SchedulerKey(Type.PING_TIMEOUT, ctx.channel()),
             delay = configuration.firstDataTimeout,
             unit = TimeUnit.MILLISECONDS,
             runnable = {
@@ -125,10 +109,11 @@ class AuthorizeHandler(
             headers[name] = values
         }
         val data = HandshakeData(
-            req.headers(), params,
-            channel.remoteAddress() as InetSocketAddress,
-            channel.localAddress() as InetSocketAddress,
-            req.uri(), origin != null && !origin.equals("null", ignoreCase = true)
+            httpHeaders = req.headers(), urlParams = params,
+            address = channel.remoteAddress() as InetSocketAddress,
+            local = channel.localAddress() as InetSocketAddress,
+            url = req.uri(),
+            xdomain = origin != null && !origin.equals("null", ignoreCase = true)
         )
 
         if (!configuration.authorizationListener.isAuthorized(data)) {
@@ -171,6 +156,7 @@ class AuthorizeHandler(
             scheduler = scheduler,
             configuration = configuration
         )
+
         channel.attr(ClientHead.CLIENT).set(client)
         clientsBox.addClient(client)
 
@@ -200,7 +186,7 @@ class AuthorizeHandler(
         val errorData: MutableMap<String, Any> = HashMap()
         errorData["code"] = 0
         errorData["message"] = "Transport unknown"
-        channel.attr<String?>(EncoderHandler.Companion.ORIGIN).set(origin)
+        channel.attr(EncoderHandler.ORIGIN).set(origin)
         channel.writeAndFlush(HttpErrorMessage(errorData))
     }
 
@@ -214,17 +200,16 @@ class AuthorizeHandler(
         if (values.size == 1) {
             try {
                 return UUID.fromString(values[0])
-            } catch (iaex: IllegalArgumentException) {
+            } catch (e: IllegalArgumentException) {
                 log.warn("Malformed UUID received for session! io=" + values[0])
             }
         }
         for (cookieHeader in headers.getAll(HttpHeaderNames.COOKIE)) {
-            val cookies: Set<Cookie> = ServerCookieDecoder.LAX.decode(cookieHeader)
-            for (cookie in cookies) {
+            for (cookie in ServerCookieDecoder.LAX.decode(cookieHeader)) {
                 if (cookie.name() == "io") {
                     try {
                         return UUID.fromString(cookie.value())
-                    } catch (iaex: IllegalArgumentException) {
+                    } catch (e: IllegalArgumentException) {
                         log.warn("Malformed UUID received for session! io=" + cookie.value())
                     }
                 }
@@ -239,10 +224,11 @@ class AuthorizeHandler(
     }
 
     fun connect(client: ClientHead) {
-        val ns: Namespace = namespacesHub.get(Namespace.DEFAULT_NAME)
+        val ns = namespacesHub[Namespace.DEFAULT_NAME]!!
         if (!client.namespaces.contains(ns)) {
-            val packet = Packet(PacketType.MESSAGE)
-            packet.subType = PacketType.CONNECT
+            val packet = Packet(PacketType.MESSAGE).apply {
+                subType = PacketType.CONNECT
+            }
             client.send(packet)
             val nsClient = client.addNamespaceClient(ns)
             ns.onConnect(nsClient)

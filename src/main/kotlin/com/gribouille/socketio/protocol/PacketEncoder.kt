@@ -136,11 +136,11 @@ class PacketEncoder(configuration: Configuration, val jsonSupport: JsonSupport) 
                             values.add(packet.name)
                         }
                         encBuf = allocateBuffer(allocator)
-                        val args = packet.getData<List<Any?>>()!!
-                        values.addAll(args)
+                        val arg = packet.getData<Any>()
+                        values.add(arg)
                         val out = ByteBufOutputStream(encBuf)
                         jsonSupport.writeValue(out, values)
-                        if (!jsonSupport.arrays.isEmpty()) {
+                        if (jsonSupport.arrays.isNotEmpty()) {
                             packet.initAttachments(jsonSupport.arrays.size)
                             for (array in jsonSupport.arrays) {
                                 packet.addAttachment(Unpooled.wrappedBuffer(array))

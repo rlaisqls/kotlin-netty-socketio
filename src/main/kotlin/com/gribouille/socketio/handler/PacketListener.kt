@@ -12,6 +12,12 @@ import com.gribouille.socketio.scheduler.CancelableScheduler
 import com.gribouille.socketio.scheduler.SchedulerKey
 import com.gribouille.socketio.transport.NamespaceClient
 import com.gribouille.socketio.transport.PollingTransport
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.time.withTimeout
+import kotlinx.coroutines.withTimeout
 
 class PacketListener(
     private val namespacesHub: NamespacesHub,
@@ -35,13 +41,13 @@ class PacketListener(
                 } else {
                     client.baseClient.schedulePingTimeout()
                 }
-                val namespace = namespacesHub[packet.nsp]
+                val namespace = namespacesHub[packet.nsp]!!
                 namespace.onPing(client)
             }
 
             PacketType.PONG -> {
                 client.baseClient.schedulePingTimeout()
-                val namespace = namespacesHub[packet.nsp]
+                val namespace = namespacesHub[packet.nsp]!!
                 namespace.onPong(client)
             }
 
@@ -59,7 +65,7 @@ class PacketListener(
                         client.onDisconnect()
                     }
                     PacketType.CONNECT -> {
-                        val namespace = namespacesHub[packet.nsp]
+                        val namespace = namespacesHub[packet.nsp]!!
                         namespace.onConnect(client)
                         // send connect handshake packet back to client
                         client.baseClient.send(packet, transport)
@@ -68,7 +74,7 @@ class PacketListener(
                         ackManager.onAck(client, packet)
                     }
                     PacketType.EVENT, PacketType.BINARY_EVENT -> {
-                        namespacesHub[packet.nsp].onEvent(
+                        namespacesHub[packet.nsp]!!.onEvent(
                             client = client,
                             eventName = packet.name!!,
                             args = packet.data?.let { it as List<Any> } ?: emptyList(),

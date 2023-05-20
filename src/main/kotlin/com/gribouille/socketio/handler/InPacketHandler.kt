@@ -46,8 +46,7 @@ class InPacketHandler(
                 if (packet.hasAttachments() && !packet.isAttachmentsLoaded) {
                     return
                 }
-                val ns = namespacesHub[packet.nsp]
-                if (ns == null) {
+                val ns = namespacesHub[packet.nsp] ?: run {
                     if (packet.subType == PacketType.CONNECT) {
                         val p = Packet(PacketType.MESSAGE)
                         p.subType = PacketType.ERROR
@@ -66,8 +65,7 @@ class InPacketHandler(
                 if (packet.subType == PacketType.CONNECT) {
                     client.addNamespaceClient(ns)
                 }
-                val nClient: NamespaceClient? = client.getChildClient(ns)
-                if (nClient == null) {
+                val nClient = client.getChildClient(ns) ?: run {
                     log.debug(
                         "Can't find namespace client in namespace: {}, sessionId: {} probably it was disconnected.",
                         ns.name,
@@ -84,6 +82,7 @@ class InPacketHandler(
         }
     }
 
+    @Deprecated("Deprecated in Java")
     @Throws(Exception::class)
     override fun exceptionCaught(ctx: ChannelHandlerContext, e: Throwable) {
         if (!exceptionListener.exceptionCaught(ctx, e)) {

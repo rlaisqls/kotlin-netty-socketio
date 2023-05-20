@@ -1,7 +1,6 @@
 
 package com.gribouille.socketio.protocol
 
-import com.gribouille.socketio.AckCallback
 import com.gribouille.socketio.ack.AckManager
 import com.gribouille.socketio.handler.ClientHead
 import io.netty.buffer.ByteBuf
@@ -12,16 +11,13 @@ import io.netty.util.CharsetUtil
 import java.io.IOException
 import java.net.URLDecoder
 import java.util.LinkedList
+import kotlin.math.min
 
-class PacketDecoder(private val jsonSupport: JsonSupport, ackManager: AckManager) {
-
-    private val utf8scanner = UTF8CharsScanner()
-    private val QUOTES: ByteBuf = Unpooled.copiedBuffer("\"", CharsetUtil.UTF_8)
+class PacketDecoder(
+    private val jsonSupport: JsonSupport,
     private val ackManager: AckManager
-
-    init {
-        this.ackManager = ackManager
-    }
+) {
+    private val QUOTES: ByteBuf = Unpooled.copiedBuffer("\"", CharsetUtil.UTF_8)
 
     private fun isStringPacket(content: ByteBuf): Boolean {
         return content.getByte(content.readerIndex()).toInt() == 0x0
@@ -48,35 +44,35 @@ class PacketDecoder(private val jsonSupport: JsonSupport, ackManager: AckManager
 
     // fastest way to parse chars to int
     private fun readLong(chars: ByteBuf, length: Int): Long {
-        var result: Long = 0
-        for (i in chars.readerIndex() until chars.readerIndex() + length) {
-            var digit: Int = chars.getByte(i).toInt() and 0xF
-            for (j in 0 until chars.readerIndex() + length - 1 - i) {
-                digit *= 10
+        val result = (chars.readerIndex() until chars.readerIndex() + length)
+            .sumOf { i ->
+                var digit = chars.getByte(i).toInt() and 0xF
+                for (j in 0 until chars.readerIndex() + length - 1 - i) {
+                    digit *= 10
+                }
+                digit.toLong()
             }
-            result += digit.toLong()
-        }
+
         chars.readerIndex(chars.readerIndex() + length)
         return result
     }
 
     private fun readType(buffer: ByteBuf): PacketType {
-        val typeId: Int = buffer.readByte().toInt() and 0xF
-        return PacketType.Companion.valueOf(typeId)
+        val typeId = buffer.readByte().toInt() and 0xF
+        return PacketType.valueOf(typeId)
     }
 
     private fun readInnerType(buffer: ByteBuf): PacketType {
-        val typeId: Int = buffer.readByte().toInt() and 0xF
-        return PacketType.Companion.valueOfInner(typeId)
+        val typeId = buffer.readByte().toInt() and 0xF
+        return PacketType.valueOfInner(typeId)
     }
 
     private fun hasLengthHeader(buffer: ByteBuf): Boolean {
-        for (i in 0 until Math.min(buffer.readableBytes(), 10)) {
-            val b: Byte = buffer.getByte(buffer.readerIndex() + i)
+        for (i in 0 until min(buffer.readableBytes(), 10)) {
+            val b = buffer.getByte(buffer.readerIndex() + i)
             if (b == ':'.code.toByte() && i > 0) {
                 return true
-            }
-            if (b > 57 || b < 48) {
+            } else if (b > 57 || b < 48) {
                 return false
             }
         }
@@ -85,23 +81,28 @@ class PacketDecoder(private val jsonSupport: JsonSupport, ackManager: AckManager
 
     @Throws(IOException::class)
     fun decodePackets(buffer: ByteBuf, client: ClientHead): Packet {
+
         if (isStringPacket(buffer)) {
-            // TODO refactor
-            val maxLength = Math.min(buffer.readableBytes(), 10)
-            var headEndIndex: Int = buffer.bytesBefore(maxLength, (-1).toByte())
-            if (headEndIndex == -1) {
-                headEndIndex = buffer.bytesBefore(maxLength, 0x3f.toByte())
+
+            val maxLength = buffer.readableBytes().coerceAtMost(10)
+            val headEndIndex = buffer.bytesBefore(maxLength, (-1).toByte()).run {
+                if (this == -1) {
+                    buffer.bytesBefore(maxLength, 0x3f.toByte())
+                } else this
             }
+
             val len = readLong(buffer, headEndIndex).toInt()
-            val frame: ByteBuf = buffer.slice(buffer.readerIndex() + 1, len)
+            val frame = buffer.slice(buffer.readerIndex() + 1, len)
             // skip this frame
             buffer.readerIndex(buffer.readerIndex() + 1 + len)
             return decode(client, frame)
         } else if (hasLengthHeader(buffer)) {
-            // TODO refactor
-            val lengthEndIndex: Int = buffer.bytesBefore(':'.code.toByte())
-            val lenHeader = readLong(buffer, lengthEndIndex).toInt()
-            val len = utf8scanner.getActualLength(buffer, lenHeader)
+
+            val lenHeader = readLong(
+                chars = buffer,
+                length = buffer.bytesBefore(':'.code.toByte())
+            ).toInt()
+            val len = UTF8CharsScanner.getActualLength(buffer, lenHeader)
             val frame: ByteBuf = buffer.slice(buffer.readerIndex() + 1, len)
             // skip this frame
             buffer.readerIndex(buffer.readerIndex() + 1 + len)
@@ -117,8 +118,10 @@ class PacketDecoder(private val jsonSupport: JsonSupport, ackManager: AckManager
     }
 
     private fun decode(head: ClientHead, frame: ByteBuf): Packet {
-        if (frame.getByte(0) == 'b'.code.toByte() && frame.getByte(1) == '4'.code.toByte() || frame.getByte(0)
-                .toInt() == 4 || frame.getByte(0).toInt() == 1
+        if (frame.getByte(0) == 'b'.code.toByte() &&
+            frame.getByte(1) == '4'.code.toByte() ||
+            frame.getByte(0).toInt() == 4 ||
+            frame.getByte(0).toInt() == 1
         ) {
             return parseBinary(head, frame)
         }
@@ -128,7 +131,7 @@ class PacketDecoder(private val jsonSupport: JsonSupport, ackManager: AckManager
             packet.data = readString(frame)
             return packet
         }
-        if (!frame.isReadable()) {
+        if (!frame.isReadable) {
             return packet
         }
         val innerType = readInnerType(frame)
@@ -139,11 +142,13 @@ class PacketDecoder(private val jsonSupport: JsonSupport, ackManager: AckManager
     }
 
     private fun parseHeader(frame: ByteBuf, packet: Packet, innerType: PacketType) {
-        var endIndex: Int = frame.bytesBefore('['.code.toByte())
-        if (endIndex <= 0) {
-            return
+        var endIndex = frame.bytesBefore('['.code.toByte()).apply {
+            if (this <= 0) {
+                return
+            }
         }
-        val attachmentsDividerIndex: Int = frame.bytesBefore(endIndex, '-'.code.toByte())
+        val attachmentsDividerIndex = frame.bytesBefore(endIndex, '-'.code.toByte())
+
         val hasAttachments = attachmentsDividerIndex != -1
         if (hasAttachments && (PacketType.BINARY_EVENT == innerType || PacketType.BINARY_ACK == innerType)) {
             val attachments = readLong(frame, attachmentsDividerIndex).toInt()
@@ -155,13 +160,14 @@ class PacketDecoder(private val jsonSupport: JsonSupport, ackManager: AckManager
             return
         }
 
-        // TODO optimize
         val hasNsp = frame.bytesBefore(endIndex, ','.code.toByte()) != -1
         if (hasNsp) {
+
             val nspAckId = readString(frame, endIndex)
             val parts = nspAckId.split(",".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
             val nsp = parts[0]
             packet.nsp = nsp
+
             if (parts.size > 1) {
                 val ackId = parts[1]
                 packet.ackId = java.lang.Long.valueOf(ackId)
@@ -172,23 +178,28 @@ class PacketDecoder(private val jsonSupport: JsonSupport, ackManager: AckManager
         }
     }
 
-    private fun parseBinary(head: ClientHead, frame: ByteBuf): Packet {
-        var frame: ByteBuf = frame
+    private fun parseBinary(head: ClientHead, f: ByteBuf): Packet {
+
+        var frame: ByteBuf = f
         if (frame.getByte(0).toInt() == 1) {
-            frame.readByte()
-            val headEndIndex: Int = frame.bytesBefore((-1).toByte())
-            val len = readLong(frame, headEndIndex).toInt()
+            val len = frame.run {
+                readByte()
+                val headEndIndex: Int = bytesBefore((-1).toByte())
+                readLong(this, headEndIndex).toInt()
+            }
             val oldFrame: ByteBuf = frame
             frame = frame.slice(oldFrame.readerIndex() + 1, len)
             oldFrame.readerIndex(oldFrame.readerIndex() + 1 + len)
         }
+
         if (frame.getByte(0) == 'b'.code.toByte() && frame.getByte(1) == '4'.code.toByte()) {
             frame.readShort()
         } else if (frame.getByte(0).toInt() == 4) {
             frame.readByte()
         }
-        val binaryPacket = head.lastBinaryPacket
-        if (binaryPacket != null) {
+
+        head.lastBinaryPacket?.let { binaryPacket ->
+
             if (frame.getByte(0) == 'b'.code.toByte() && frame.getByte(1) == '4'.code.toByte()) {
                 binaryPacket.addAttachment(Unpooled.copiedBuffer(frame))
             } else {
@@ -197,20 +208,22 @@ class PacketDecoder(private val jsonSupport: JsonSupport, ackManager: AckManager
                 attachBuf.release()
             }
             frame.readerIndex(frame.readerIndex() + frame.readableBytes())
+
             if (binaryPacket.isAttachmentsLoaded) {
                 val slices = LinkedList<ByteBuf>()
-                val source: ByteBuf = binaryPacket.dataSource!!
+                val source = binaryPacket.dataSource!!
+
                 for (i in binaryPacket.attachments.indices) {
-                    val attachment: ByteBuf = binaryPacket.attachments[i]!!
-                    var scanValue: ByteBuf =
+                    val attachment = binaryPacket.attachments[i]!!
+                    var scanValue =
                         Unpooled.copiedBuffer("{\"_placeholder\":true,\"num\":$i}", CharsetUtil.UTF_8)
-                    var pos: Int = PacketEncoder.Companion.find(source, scanValue)
+                    var pos = PacketEncoder.find(source, scanValue)
                     if (pos == -1) {
                         scanValue = Unpooled.copiedBuffer("{\"num\":$i,\"_placeholder\":true}", CharsetUtil.UTF_8)
-                        pos = PacketEncoder.Companion.find(source, scanValue)
+                        pos = PacketEncoder.find(source, scanValue)
                         check(pos != -1) { "Can't find attachment by index: $i in packet source" }
                     }
-                    val prefixBuf: ByteBuf = source.slice(source.readerIndex(), pos - source.readerIndex())
+                    val prefixBuf = source.slice(source.readerIndex(), pos - source.readerIndex())
                     slices.add(prefixBuf)
                     slices.add(QUOTES)
                     slices.add(attachment)
@@ -218,8 +231,11 @@ class PacketDecoder(private val jsonSupport: JsonSupport, ackManager: AckManager
                     source.readerIndex(pos + scanValue.readableBytes())
                 }
                 slices.add(source.slice())
-                val compositeBuf: ByteBuf = Unpooled.wrappedBuffer(*slices.toTypedArray<ByteBuf>())
-                parseBody(head, compositeBuf, binaryPacket)
+                parseBody(
+                    head = head,
+                    frame = Unpooled.wrappedBuffer(*slices.toTypedArray()),
+                    packet = binaryPacket
+                )
                 head.lastBinaryPacket = null
                 return binaryPacket
             }
@@ -229,9 +245,7 @@ class PacketDecoder(private val jsonSupport: JsonSupport, ackManager: AckManager
 
     private fun parseBody(head: ClientHead, frame: ByteBuf, packet: Packet) {
         if (packet.type == PacketType.MESSAGE) {
-            if (packet.subType == PacketType.CONNECT
-                || packet.subType == PacketType.DISCONNECT
-            ) {
+            if (packet.subType == PacketType.CONNECT || packet.subType == PacketType.DISCONNECT) {
                 packet.nsp = readNamespace(frame)
             }
             if (packet.hasAttachments() && !packet.isAttachmentsLoaded) {
@@ -244,14 +258,14 @@ class PacketDecoder(private val jsonSupport: JsonSupport, ackManager: AckManager
             }
             when (packet.subType) {
                 PacketType.ACK, PacketType.BINARY_ACK -> {
-                    val `in` = ByteBufInputStream(frame)
+                    val inputStream = ByteBufInputStream(frame)
                     val callback = ackManager.getCallback(head.sessionId!!, packet.ackId!!)!!
-                    val args = jsonSupport.readAckArgs(`in`, callback)
+                    val args = jsonSupport.readAckArgs(inputStream, callback)
                     packet.data = args.args
                 }
                 PacketType.EVENT, PacketType.BINARY_EVENT -> {
-                    val `in` = ByteBufInputStream(frame)
-                    val event = jsonSupport.readValue(packet.nsp, `in`, Event::class.java)
+                    val inputStream = ByteBufInputStream(frame)
+                    val event = jsonSupport.readValue(packet.nsp, inputStream, Event::class.java)
                     packet.name = event.name
                     packet.data = event.args
                 }
@@ -269,7 +283,7 @@ class PacketDecoder(private val jsonSupport: JsonSupport, ackManager: AckManager
         val buffer: ByteBuf = frame.slice()
         // skip this frame
         frame.readerIndex(frame.readerIndex() + frame.readableBytes())
-        var endIndex: Int = buffer.bytesBefore('?'.code.toByte())
+        var endIndex = buffer.bytesBefore('?'.code.toByte())
         if (endIndex > 0) {
             return readString(buffer, endIndex)
         }

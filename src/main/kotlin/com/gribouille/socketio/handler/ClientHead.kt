@@ -22,6 +22,7 @@ import io.netty.handler.codec.http.HttpHeaderNames
 import io.netty.util.AttributeKey
 import org.slf4j.LoggerFactory
 import java.net.SocketAddress
+import java.time.LocalDateTime
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -68,7 +69,7 @@ class ClientHead(
         val state = channels[Transport.POLLING]!!
         if (channel == state.channel) {
             clientsBox.remove(channel)
-            state!!.update(null)
+            state.update(null)
         }
     }
 
@@ -93,9 +94,8 @@ class ClientHead(
             delay = configuration.pingInterval,
             unit = TimeUnit.MILLISECONDS,
             runnable = {
-                val client = clientsBox[sessionId]
-                if (client != null) {
-                    client.send(Packet(PacketType.PING))
+                clientsBox[sessionId]?.run {
+                    send(Packet(PacketType.PING))
                     schedulePing()
                 }
             }
@@ -121,7 +121,7 @@ class ClientHead(
 
     fun send(packet: Packet?, transport: Transport): ChannelFuture? {
         val state = channels[transport]!!
-        state.packetsQueue!!.add(packet)
+        state.packetsQueue.add(packet)
         val channel = state.channel
         return if (channel == null || transport == Transport.POLLING && channel.attr(
                 EncoderHandler.WRITE_ONCE
