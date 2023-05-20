@@ -33,17 +33,16 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 
 class SocketIOChannelInitializer : ChannelInitializer<Channel>(), DisconnectableHub {
+
     private var ackManager: AckManager? = null
     private val clientsBox: ClientsBox = ClientsBox()
     private var authorizeHandler: AuthorizeHandler? = null
     private var xhrPollingTransport: PollingTransport? = null
     private var webSocketTransport: WebSocketTransport? = null
-    private val webSocketTransportCompression: WebSocketServerCompressionHandler = WebSocketServerCompressionHandler()
     private var encoderHandler: EncoderHandler? = null
     private var wrongUrlHandler: WrongUrlHandler? = null
     private val scheduler: CancelableScheduler = HashedWheelTimeoutScheduler()
     private var packetHandler: InPacketHandler? = null
-    private var sslContext: SSLContext? = null
     private var configuration: Configuration? = null
 
     override fun handlerAdded(ctx: ChannelHandlerContext) {
@@ -59,11 +58,10 @@ class SocketIOChannelInitializer : ChannelInitializer<Channel>(), Disconnectable
         val jsonSupport = configuration.jsonSupport!!
         val encoder = PacketEncoder(configuration, jsonSupport)
         val decoder = PacketDecoder(jsonSupport, ackManager!!)
-        val connectPath: String = configuration.context + "/"
 
-        val factory: StoreFactory = configuration.storeFactory
+        val factory = configuration.storeFactory
         authorizeHandler = AuthorizeHandler(
-            connectPath,
+            configuration.context,
             scheduler,
             configuration,
             namespacesHub!!,
@@ -76,11 +74,7 @@ class SocketIOChannelInitializer : ChannelInitializer<Channel>(), Disconnectable
         webSocketTransport = WebSocketTransport(authorizeHandler!!, configuration, scheduler, clientsBox)
         val packetListener = PacketListener(namespacesHub, ackManager!!, scheduler)
         packetHandler = InPacketHandler(packetListener, decoder, namespacesHub, configuration.exceptionListener)
-        try {
-            encoderHandler = EncoderHandler(configuration, encoder)
-        } catch (e: Exception) {
-            throw IllegalStateException(e)
-        }
+        encoderHandler = EncoderHandler(configuration, encoder)
         wrongUrlHandler = WrongUrlHandler()
     }
 
@@ -107,7 +101,6 @@ class SocketIOChannelInitializer : ChannelInitializer<Channel>(), Disconnectable
         pipeline.addLast(PACKET_HANDLER, packetHandler)
         pipeline.addLast(AUTHORIZE_HANDLER, authorizeHandler)
         pipeline.addLast(XHR_POLLING_TRANSPORT, xhrPollingTransport)
-        // TODO use single instance when https://github.com/netty/netty/issues/4755 will be resolved
         if (configuration!!.isWebsocketCompression) {
             pipeline.addLast(WEB_SOCKET_TRANSPORT_COMPRESSION, WebSocketServerCompressionHandler())
         }
