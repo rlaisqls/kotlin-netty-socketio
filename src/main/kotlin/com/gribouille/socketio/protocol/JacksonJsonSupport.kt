@@ -36,7 +36,7 @@ import java.io.OutputStream
 import java.lang.reflect.Type
 import java.util.concurrent.ConcurrentHashMap
 
-class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
+open class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
 
     protected val modifier = ExBeanSerializerModifier()
     protected val namespaceClass = ThreadLocal<String?>()
@@ -120,7 +120,7 @@ class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
 
         override fun deserialize(jp: JsonParser, ctxt: DeserializationContext?): Event {
             val mapper = jp.codec as ObjectMapper
-            val eventName: String = jp.nextTextValue()
+            val eventName: String? = jp.nextTextValue()
 
             var ek = EventKey(namespaceClass.get(), eventName)
             if (!eventMapping.containsKey(ek)) {

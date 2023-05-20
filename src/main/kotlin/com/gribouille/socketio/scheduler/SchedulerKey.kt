@@ -1,7 +1,10 @@
 
 package com.gribouille.socketio.scheduler
 
-open class SchedulerKey(private val type: Type?, private val sessionId: Any?) {
+open class SchedulerKey(
+    private val type: Type?,
+    private val sessionId: Any?
+) {
     enum class Type {
         PING, PING_TIMEOUT, ACK_TIMEOUT, UPGRADE_TIMEOUT
     }

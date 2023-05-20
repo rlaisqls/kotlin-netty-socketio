@@ -6,13 +6,13 @@ import io.netty.buffer.ByteBuf
 import java.io.Serializable
 
 class Packet(
-    var type: PacketType? = null
+    var type: PacketType? = null,
+    var nsp: String = Namespace.DEFAULT_NAME,
+    var data: Any? = null
 ) : Serializable {
     var subType: PacketType? = null
     var ackId: Long? = null
     var name: String? = null
-    var nsp: String = Namespace.DEFAULT_NAME
-    var data: Any? = null
     var attachments: MutableList<ByteBuf?> = mutableListOf()
     private var attachmentsCount = 0
     var dataSource: ByteBuf? = null
@@ -25,25 +25,21 @@ class Packet(
         return data as T
     }
 
-    fun withNsp(namespace: String): Packet {
+    fun withNsp(namespace: String?): Packet? {
         return if (nsp.equals(namespace, ignoreCase = true)) {
             this
         } else {
-            copyWithNsp(namespace)
+            val newPacket = Packet(type)
+            newPacket.ackId = ackId
+            newPacket.data = data
+            newPacket.dataSource = dataSource
+            newPacket.name = name
+            newPacket.subType = subType
+            newPacket.nsp = nsp
+            newPacket.attachments = attachments
+            newPacket.attachmentsCount = attachmentsCount
+            newPacket
         }
-    }
-
-    private fun copyWithNsp(namespace: String): Packet {
-        val newPacket = Packet(type)
-        newPacket.ackId = ackId
-        newPacket.data = data
-        newPacket.dataSource = dataSource
-        newPacket.name = name
-        newPacket.subType = subType
-        newPacket.nsp = namespace
-        newPacket.attachments = attachments
-        newPacket.attachmentsCount = attachmentsCount
-        return newPacket
     }
 
     val isAckRequested: Boolean
@@ -64,7 +60,7 @@ class Packet(
     }
 
     override fun toString(): String {
-        return "Packet [type=$type, ackId=$ackId]"
+        return "Packet [type=$type, ackId=$ackId, data=$data]"
     }
 
     companion object {

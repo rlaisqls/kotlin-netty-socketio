@@ -86,7 +86,6 @@ class HashedWheelTimeoutScheduler : CancelableScheduler {
         } else {
             scheduledFutures.put(key, newTimeout)
         }
-
         // 동일한 키에 대한 timeout이 이미 존재한다면 취소한다.
         oldTimeout?.cancel()
     }

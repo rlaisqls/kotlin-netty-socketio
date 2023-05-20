@@ -10,7 +10,6 @@ import com.gribouille.socketio.messages.OptionsMessage
 import com.gribouille.socketio.messages.PostMessage
 import com.gribouille.socketio.protocol.PacketDecoder
 import io.netty.buffer.ByteBuf
-import io.netty.channel.Channel
 import io.netty.channel.ChannelFutureListener
 import io.netty.channel.ChannelHandler.Sharable
 import io.netty.channel.ChannelHandlerContext
@@ -139,16 +138,16 @@ class PollingTransport(
         // 메시지 처리 전 POST 응답 release
         ctx.channel().writeAndFlush(PostMessage(origin, sessionId))
 
-        var content = content
+        var packetContent = content
         val b64 = ctx.channel().attr(EncoderHandler.B64).get()
         if (b64 == true) {
             val jsonIndex = ctx.channel().attr(EncoderHandler.JSONP_INDEX).get()
-            content = decoder.preprocessJson(jsonIndex, content)
+            packetContent = decoder.preprocessJson(jsonIndex, packetContent)
         }
         ctx.pipeline().fireChannelRead(
             PacketsMessage(
                 client = client,
-                content = content,
+                content = packetContent,
                 transport = Transport.POLLING
             )
         )
