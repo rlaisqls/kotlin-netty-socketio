@@ -44,9 +44,8 @@ object SocketAnnotationScanner {
         val annotation = annot as OnEvent
         require(annotation.value.trim { it <= ' ' }.isNotEmpty()) { "OnEvent \"value\" parameter is required" }
 
-
         val requestType = getDataType(method)
-        namespace.addEventListener(annotation.value, Event::class.java, object : DataListener {
+        namespace.addEventListener(annotation.value, Any::class.java, object : DataListener {
             override fun onData(client: SocketIOClient, data: Any, ackSender: AckRequest) {
                 try {
                     val args: MutableList<Any> = ArrayList()
