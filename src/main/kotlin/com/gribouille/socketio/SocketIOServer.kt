@@ -23,43 +23,39 @@ import java.util.*
 
 /**
  * Fully thread-safe.
- *
  */
-class SocketIOServer(configuration: Configuration) : ClientListeners {
-    private val configCopy: Configuration
-    private val configuration: Configuration
-    private val namespacesHub: NamespacesHub
-    private val mainNamespace: SocketIONamespace
+class SocketIOServer(
+    private val configuration: Configuration,
+) : ClientListeners {
+
+    private val configCopy = Configuration(configuration)
+    private val namespacesHub = NamespacesHub(configCopy)
+    private val mainNamespace = addNamespace(Namespace.DEFAULT_NAME)
+
     private var pipelineFactory: SocketIOChannelInitializer = SocketIOChannelInitializer()
     private var bossGroup: EventLoopGroup? = null
     private var workerGroup: EventLoopGroup? = null
-
-    init {
-        this.configuration = configuration
-        configCopy = Configuration(configuration)
-        namespacesHub = NamespacesHub(configCopy)
-        mainNamespace = addNamespace(Namespace.DEFAULT_NAME)
-    }
 
     fun setPipelineFactory(pipelineFactory: SocketIOChannelInitializer) {
         this.pipelineFactory = pipelineFactory
     }
 
-    val allClients: Collection<com.gribouille.socketio.SocketIOClient>
-        get() = namespacesHub.get(Namespace.DEFAULT_NAME).allClients
+    val allClients: Collection<SocketIOClient>
+        get() = namespacesHub[Namespace.DEFAULT_NAME]!!.allClients
 
     fun getClient(uuid: UUID): SocketIOClient {
-        return namespacesHub[Namespace.DEFAULT_NAME].getClient(uuid)!!
+        return namespacesHub[Namespace.DEFAULT_NAME]!!.getClient(uuid)!!
     }
 
     val allNamespaces: Collection<SocketIONamespace>
         get() = namespacesHub.allNamespaces
+
     val broadcastOperations: BroadcastOperations
         get() {
             val namespaces: Collection<SocketIONamespace> = namespacesHub.allNamespaces
-            val list: MutableList<BroadcastOperations> = ArrayList<BroadcastOperations>()
+            val list = ArrayList<BroadcastOperations>()
             var broadcast: BroadcastOperations? = null
-            if (namespaces != null && namespaces.size > 0) {
+            if (namespaces.isNotEmpty()) {
                 for (n in namespaces) {
                     list.add(n.broadcastOperations!!)
                 }
@@ -75,10 +71,12 @@ class SocketIOServer(configuration: Configuration) : ClientListeners {
      * @return broadcast operations
      */
     fun getRoomOperations(room: String): BroadcastOperations {
+
         val namespaces: Collection<SocketIONamespace> = namespacesHub.allNamespaces
-        val list: MutableList<BroadcastOperations> = ArrayList<BroadcastOperations>()
+        val list = ArrayList<BroadcastOperations>()
         var broadcast: BroadcastOperations? = null
-        if (namespaces != null && namespaces.size > 0) {
+
+        if (namespaces.isNotEmpty()) {
             for (n in namespaces) {
                 list.add(n.getRoomOperations(room)!!)
             }
@@ -102,56 +100,67 @@ class SocketIOServer(configuration: Configuration) : ClientListeners {
         log.info("Session store / pubsub factory used: {}", configCopy.storeFactory)
         initGroups()
         pipelineFactory.start(configCopy, namespacesHub)
-        var channelClass: Class<out ServerChannel?> = NioServerSocketChannel::class.java
-        if (configCopy.isUseLinuxNativeEpoll) {
-            channelClass = EpollServerSocketChannel::class.java
-        }
+
+        val channelClass: Class<out ServerChannel?> = if (configCopy.isUseLinuxNativeEpoll) {
+            EpollServerSocketChannel::class.java
+        } else NioServerSocketChannel::class.java
+
         val b = ServerBootstrap()
-        b.group(bossGroup, workerGroup)
-            .channel(channelClass)
-            .childHandler(pipelineFactory)
-        applyConnectionOptions(b)
-        var addr: InetSocketAddress? = InetSocketAddress(configCopy.port)
-        if (configCopy.hostname != null) {
-            addr = InetSocketAddress(configCopy.hostname, configCopy.port)
-        }
-        return b.bind(addr).addListener(object : FutureListener<Void?> {
-            @Throws(Exception::class)
-            override fun operationComplete(future: Future<Void?>) {
-                if (future.isSuccess) {
-                    log.info("SocketIO server started at port: {}", configCopy.port)
-                } else {
-                    log.error("SocketIO server start failed at port: {}!", configCopy.port)
-                }
+            .apply {
+                group(bossGroup, workerGroup)
+                    .channel(channelClass)
+                    .childHandler(pipelineFactory)
             }
-        })
+
+        applyConnectionOptions(b)
+
+        val addr = configCopy.hostname?.let {
+            InetSocketAddress(it, configCopy.port)
+        } ?: InetSocketAddress(configCopy.port)
+
+        return b.bind(addr)
+            .addListener(object : FutureListener<Void?> {
+                @Throws(Exception::class)
+                override fun operationComplete(future: Future<Void?>) {
+                    if (future.isSuccess) {
+                        log.info("SocketIO server started at port: {}", configCopy.port)
+                    } else {
+                        log.error("SocketIO server start failed at port: {}!", configCopy.port)
+                    }
+                }
+            }).sync()
     }
 
     protected fun applyConnectionOptions(bootstrap: ServerBootstrap) {
-        val config: SocketConfig = configCopy.socketConfig
-        bootstrap.childOption(ChannelOption.TCP_NODELAY, config.isTcpNoDelay)
-        if (config.tcpSendBufferSize !== -1) {
-            bootstrap.childOption(ChannelOption.SO_SNDBUF, config.tcpSendBufferSize)
-        }
-        if (config.tcpReceiveBufferSize !== -1) {
-            bootstrap.childOption(ChannelOption.SO_RCVBUF, config.tcpReceiveBufferSize)
-            bootstrap.childOption<RecvByteBufAllocator>(
-                ChannelOption.RCVBUF_ALLOCATOR,
-                FixedRecvByteBufAllocator(config.tcpReceiveBufferSize)
-            )
-        }
-        //default value @see WriteBufferWaterMark.DEFAULT
-        if (config.writeBufferWaterMarkLow !== -1 && config.writeBufferWaterMarkHigh !== -1) {
-            bootstrap.childOption<WriteBufferWaterMark>(
-                ChannelOption.WRITE_BUFFER_WATER_MARK, WriteBufferWaterMark(
-                    config.writeBufferWaterMarkLow, config.writeBufferWaterMarkHigh
+        val config = configCopy.socketConfig
+        with(bootstrap) {
+            childOption(ChannelOption.TCP_NODELAY, config.isTcpNoDelay)
+            childOption(ChannelOption.SO_KEEPALIVE, config.isTcpKeepAlive)
+            childOption(ChannelOption.SO_LINGER, config.soLinger)
+            option(ChannelOption.SO_REUSEADDR, config.isReuseAddress)
+            option(ChannelOption.SO_BACKLOG, config.acceptBackLog)
+
+            if (config.tcpSendBufferSize != -1) {
+                childOption(ChannelOption.SO_SNDBUF, config.tcpSendBufferSize)
+            }
+
+            if (config.tcpReceiveBufferSize != -1) {
+                childOption(ChannelOption.SO_RCVBUF, config.tcpReceiveBufferSize)
+                childOption(
+                    ChannelOption.RCVBUF_ALLOCATOR,
+                    FixedRecvByteBufAllocator(config.tcpReceiveBufferSize)
                 )
-            )
+            }
+
+            //default value @see WriteBufferWaterMark.DEFAULT
+            if (config.writeBufferWaterMarkLow != -1 && config.writeBufferWaterMarkHigh != -1) {
+                childOption(
+                    ChannelOption.WRITE_BUFFER_WATER_MARK, WriteBufferWaterMark(
+                        config.writeBufferWaterMarkLow, config.writeBufferWaterMarkHigh
+                    )
+                )
+            }
         }
-        bootstrap.childOption(ChannelOption.SO_KEEPALIVE, config.isTcpKeepAlive)
-        bootstrap.childOption(ChannelOption.SO_LINGER, config.soLinger)
-        bootstrap.option(ChannelOption.SO_REUSEADDR, config.isReuseAddress)
-        bootstrap.option(ChannelOption.SO_BACKLOG, config.acceptBackLog)
     }
 
     protected fun initGroups() {
@@ -176,7 +185,7 @@ class SocketIOServer(configuration: Configuration) : ClientListeners {
     }
 
     fun getNamespace(name: String): SocketIONamespace {
-        return namespacesHub[name]
+        return namespacesHub[name]!!
     }
 
     fun removeNamespace(name: String?) {

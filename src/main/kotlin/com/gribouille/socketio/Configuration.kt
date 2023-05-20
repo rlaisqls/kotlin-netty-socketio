@@ -21,7 +21,7 @@ class Configuration {
      * @see com.gribouille.socketio.listener.ExceptionListener
      */
     var exceptionListener: ExceptionListener = DefaultExceptionListener()
-    var context = "/socket.io"
+    var context = "/socket.io/"
     var transports: List<Transport> = listOf(Transport.WEBSOCKET, Transport.POLLING)
     var bossThreads = 0 // 0 = current_processors_amount * 2
     var workerThreads = 0 // 0 = current_processors_amount * 2
@@ -29,14 +29,14 @@ class Configuration {
     var isAllowCustomRequests = false
     var upgradeTimeout = 10000
     var pingTimeout = 60000
-    var pingInterval = 25000
+    var pingInterval = 2500000
     var firstDataTimeout = 5000
     var maxHttpContentLength = 64 * 1024
     var maxFramePayloadLength = 64 * 1024
     var packagePrefix: String? = null
     var hostname: String? = null
     var port = -1
-    var sSLProtocol = "TLSv1"
+    var sslProtocol = "TLSv1"
     var keyStoreFormat = "JKS"
     var keyStore: InputStream? = null
     var keyStorePassword: String? = null
@@ -47,9 +47,9 @@ class Configuration {
     var isPreferDirectBuffer = true
     var socketConfig: SocketConfig = SocketConfig()
     var storeFactory: StoreFactory = MemoryStoreFactory()
-    var jsonSupport: JsonSupport? = null
+    var jsonSupport: JsonSupport? = JsonSupportWrapper(JacksonJsonSupport())
     var authorizationListener: AuthorizationListener = SuccessAuthorizationListener()
-    var ackMode = AckMode.AUTO_SUCCESS_ONLY
+    var ackMode = AckMode.MANUAL
     var isAddVersionHeader = true
     var origin: String? = null
     var isHttpCompression = true
@@ -70,7 +70,7 @@ class Configuration {
         pingTimeout = conf.pingTimeout
         hostname = conf.hostname
         port = conf.port
-        jsonSupport = JsonSupportWrapper(JacksonJsonSupport())
+        jsonSupport = conf.jsonSupport
         context = conf.context
         isAllowCustomRequests = conf.isAllowCustomRequests
         keyStorePassword = conf.keyStorePassword
@@ -93,7 +93,7 @@ class Configuration {
         isAddVersionHeader = conf.isAddVersionHeader
         origin = conf.origin
         allowHeaders = conf.allowHeaders
-        sSLProtocol = conf.sSLProtocol
+        sslProtocol = conf.sslProtocol
         isHttpCompression = conf.isHttpCompression
         isWebsocketCompression = conf.isWebsocketCompression
         isRandomSession = conf.isRandomSession
