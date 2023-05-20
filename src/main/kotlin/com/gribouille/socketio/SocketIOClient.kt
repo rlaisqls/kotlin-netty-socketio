@@ -14,7 +14,7 @@ interface SocketIOClient : ClientOperations, Store {
     val remoteAddress: SocketAddress?
     val isChannelOpen: Boolean
     val allRooms: Set<String>
-    fun sendEvent(name: String, ackCallback: AckCallback, vararg data: Any)
+    fun sendEvent(name: String, ackCallback: AckCallback, data: Any)
     fun send(packet: Packet, ackCallback: AckCallback)
     fun joinRoom(room: String)
     fun joinRooms(rooms: Set<String>)

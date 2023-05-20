@@ -8,7 +8,7 @@ interface BroadcastOperations : ClientOperations {
     fun sendEvent(
         name: String,
         excludedClient: SocketIOClient,
-        vararg data: Any
+        data: Any
     )
     fun <T> sendEvent(
         name: String,

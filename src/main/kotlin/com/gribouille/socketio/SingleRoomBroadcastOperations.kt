@@ -30,7 +30,7 @@ class SingleRoomBroadcastOperations(
         }
     }
 
-    override fun sendEvent(name: String, excludedClient: SocketIOClient, vararg data: Any) {
+    override fun sendEvent(name: String, excludedClient: SocketIOClient, data: Any) {
         val packet = Packet(PacketType.MESSAGE).apply {
             this.subType = PacketType.EVENT
             this.name = name
@@ -44,7 +44,7 @@ class SingleRoomBroadcastOperations(
         }
     }
 
-    override fun sendEvent(name: String, vararg data: Any) {
+    override fun sendEvent(name: String, data: Any) {
         val packet = Packet(PacketType.MESSAGE).apply {
             this.subType = PacketType.EVENT
             this.name = name

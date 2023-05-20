@@ -21,10 +21,10 @@ class MultiRoomBroadcastOperations(
     override fun sendEvent(
         name: String,
         excludedClient: SocketIOClient,
-        vararg data: Any
+        data: Any
     ) {
         broadcastOperations.forEach {
-            it.sendEvent(name, excludedClient, *data)
+            it.sendEvent(name, excludedClient, data)
         }
     }
 
@@ -61,9 +61,9 @@ class MultiRoomBroadcastOperations(
         }
     }
 
-    override fun sendEvent(name: String, vararg data: Any) {
+    override fun sendEvent(name: String, data: Any) {
         broadcastOperations.forEach {
-            it.sendEvent(name, *data)
+            it.sendEvent(name, data)
         }
     }
 }
