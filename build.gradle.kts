@@ -26,6 +26,11 @@ dependencies {
     implementation("io.netty:netty-codec:$nettyVersion")
     implementation("io.netty:netty-transport-native-epoll:$nettyVersion")
 
+    val coroutineVersion = "1.6.4"
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:$coroutineVersion")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutineVersion")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor:$coroutineVersion")
+
     implementation("org.slf4j:slf4j-api:1.7.7")
     implementation("ch.qos.logback:logback-classic:1.1.2")
 }
