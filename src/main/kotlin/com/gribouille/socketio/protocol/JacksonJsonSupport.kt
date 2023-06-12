@@ -22,19 +22,19 @@ import com.fasterxml.jackson.databind.jsonFormatVisitors.JsonFormatTypes
 import com.fasterxml.jackson.databind.jsonFormatVisitors.JsonFormatVisitorWrapper
 import com.fasterxml.jackson.databind.jsontype.TypeSerializer
 import com.fasterxml.jackson.databind.module.SimpleModule
-import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.databind.ser.BeanSerializerModifier
 import com.fasterxml.jackson.databind.ser.std.StdSerializer
 import com.fasterxml.jackson.databind.type.ArrayType
-import com.gribouille.socketio.AckCallback
+import com.gribouille.socketio.ack.AckArgs
+import com.gribouille.socketio.ack.AckCallback
 import com.gribouille.socketio.namespace.Namespace
 import io.netty.buffer.ByteBufInputStream
 import io.netty.buffer.ByteBufOutputStream
-import org.slf4j.LoggerFactory
 import java.io.InputStream
 import java.io.OutputStream
 import java.lang.reflect.Type
 import java.util.concurrent.ConcurrentHashMap
+import org.slf4j.LoggerFactory
 
 open class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
 
@@ -49,10 +49,6 @@ open class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
         if (modules != null && modules.size > 0) {
             objectMapper.registerModules(modules.toList())
         }
-        init(objectMapper)
-    }
-
-    protected fun init(objectMapper: ObjectMapper) {
         val module = SimpleModule()
         module.setSerializerModifier(modifier)
         module.addDeserializer(Event::class.java, eventDeserializer)
@@ -64,22 +60,21 @@ open class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
         objectMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false)
     }
 
-
     inner class AckArgsDeserializer : StdDeserializer<AckArgs?>(AckArgs::class.java) {
 
         override fun deserialize(jp: JsonParser, ctxt: DeserializationContext?): AckArgs {
             val args: MutableList<Any> = ArrayList()
             val result = AckArgs(args)
             val mapper = jp.codec as ObjectMapper
-            val root: JsonNode = mapper.readTree(jp)
+            val root = mapper.readTree<JsonNode>(jp)
             val callback = currentAckClass.get()
-            val iter: Iterator<JsonNode> = root.iterator()
+            val iter = root.iterator()
             var i = 0
             while (iter.hasNext()) {
                 var value: Any
                 var clazz: Class<*> = callback.resultClass
 
-                val arg: JsonNode = iter.next()
+                val arg = iter.next()
                 if (arg.isTextual || arg.isBoolean) {
                     clazz = Any::class.java
                 }
@@ -91,32 +86,13 @@ open class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
         }
     }
 
-    class EventKey(private val namespaceName: String?, private val eventName: String?) {
-        override fun hashCode(): Int {
-            val prime = 31
-            var result = 1
-            result = prime * result + (eventName?.hashCode() ?: 0)
-            result = prime * result + (namespaceName?.hashCode() ?: 0)
-            return result
-        }
-
-        override fun equals(obj: Any?): Boolean {
-            if (this === obj) return true
-            if (obj == null) return false
-            if (javaClass != obj.javaClass) return false
-            val other = obj as EventKey
-            if (eventName == null) {
-                if (other.eventName != null) return false
-            } else if (eventName != other.eventName) return false
-            if (namespaceName == null) {
-                if (other.namespaceName != null) return false
-            } else if (namespaceName != other.namespaceName) return false
-            return true
-        }
-    }
+    data class EventKey(
+        private val namespaceName: String?,
+        private val eventName: String?
+    )
 
     inner class EventDeserializer : StdDeserializer<Event?>(Event::class.java) {
-        val eventMapping: MutableMap<EventKey, List<Class<*>>> = ConcurrentHashMap()
+        val eventMapping = ConcurrentHashMap<EventKey, List<Class<*>>>()
 
         override fun deserialize(jp: JsonParser, ctxt: DeserializationContext?): Event {
             val mapper = jp.codec as ObjectMapper
@@ -125,11 +101,12 @@ open class JacksonJsonSupport(vararg modules: Module) : JsonSupport {
             var ek = EventKey(namespaceClass.get(), eventName)
             if (!eventMapping.containsKey(ek)) {
                 ek = EventKey(Namespace.DEFAULT_NAME, eventName)
+
                 if (!eventMapping.containsKey(ek)) {
                     return Event(eventName, emptyList())
                 }
             }
-            val eventArgs: MutableList<Any> = ArrayList()
+            val eventArgs = ArrayList<Any>()
             val event = Event(eventName, eventArgs)
             val eventClasses = eventMapping[ek]!!
             var i = 0

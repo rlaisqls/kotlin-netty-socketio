@@ -2,13 +2,24 @@
 package com.gribouille.socketio.scheduler
 
 import io.netty.channel.ChannelHandlerContext
-import java.util.concurrent.TimeUnit
+
+
+//internal val scheduler = object: CancelableScheduler by CoroutineScheduler() {}
+internal val scheduler = object: CancelableScheduler by HashedWheelTimeoutScheduler() {}
 
 interface CancelableScheduler {
     fun update(ctx: ChannelHandlerContext?)
     fun cancel(key: SchedulerKey)
-    fun scheduleCallback(key: SchedulerKey, runnable: Runnable, delay: Int, unit: TimeUnit?)
-    fun schedule(runnable: Runnable, delay: Int, unit: TimeUnit?)
-    fun schedule(key: SchedulerKey, runnable: Runnable, delay: Int, unit: TimeUnit?)
+    fun cancel(type: SchedulerKey.Type, sessionId: Any?) = cancel(SchedulerKey(type, sessionId))
+    fun schedule(key: SchedulerKey, runnable: Runnable, delay: Int)
     fun shutdown()
+}
+
+data class SchedulerKey(
+    private val type: Type?,
+    private val sessionId: Any?
+) {
+    enum class Type {
+        PING, PING_TIMEOUT, ACK_TIMEOUT, UPGRADE_TIMEOUT
+    }
 }

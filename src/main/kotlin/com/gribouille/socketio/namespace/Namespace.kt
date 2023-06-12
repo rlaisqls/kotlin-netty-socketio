@@ -1,34 +1,35 @@
 package com.gribouille.socketio.namespace
 
-import com.gribouille.socketio.AckMode
-import com.gribouille.socketio.AckRequest
 import com.gribouille.socketio.BroadcastOperations
-import com.gribouille.socketio.Configuration
 import com.gribouille.socketio.SingleRoomBroadcastOperations
 import com.gribouille.socketio.SocketIOClient
+import com.gribouille.socketio.SocketIOConfiguration
 import com.gribouille.socketio.SocketIONamespace
-import com.gribouille.socketio.annotation.ScannerEngine
+import com.gribouille.socketio.ack.AckMode
+import com.gribouille.socketio.ack.AckRequest
+import com.gribouille.socketio.ackMode
+import com.gribouille.socketio.annotation.scannerEngine
+import com.gribouille.socketio.exceptionListener
+import com.gribouille.socketio.jsonSupport
 import com.gribouille.socketio.listener.ConnectListener
 import com.gribouille.socketio.listener.DataListener
 import com.gribouille.socketio.listener.DisconnectListener
 import com.gribouille.socketio.listener.EventInterceptor
-import com.gribouille.socketio.listener.ExceptionListener
 import com.gribouille.socketio.listener.PingListener
 import com.gribouille.socketio.listener.PongListener
-import com.gribouille.socketio.protocol.JsonSupport
 import com.gribouille.socketio.protocol.Packet
-import com.gribouille.socketio.store.StoreFactory
 import com.gribouille.socketio.transport.NamespaceClient
-import java.util.*
+import java.util.Collections
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.ConcurrentMap
 
 class Namespace(
     override val name: String,
-    configuration: Configuration
+    val configuration: SocketIOConfiguration
 ) : SocketIONamespace {
-    private val engine = ScannerEngine()
+
     private val eventListeners = ConcurrentHashMap<String, EventEntry>()
     private val connectListeners = ConcurrentLinkedQueue<ConnectListener>()
     private val disconnectListeners = ConcurrentLinkedQueue<DisconnectListener>()
@@ -37,12 +38,9 @@ class Namespace(
     private val eventInterceptors = ConcurrentLinkedQueue<EventInterceptor>()
     private val roomClients = ConcurrentHashMap<String, MutableSet<UUID>>()
     private val clientRooms = ConcurrentHashMap<UUID, MutableSet<String>>()
-    private val ackMode: AckMode = configuration.ackMode
-    private val jsonSupport = configuration.jsonSupport!!
-    private val storeFactory = configuration.storeFactory
-    private val exceptionListener = configuration.exceptionListener
 
     private val clients: MutableMap<UUID, SocketIOClient> = ConcurrentHashMap()
+
     override val allClients: Collection<SocketIOClient>
         get() = clients.values
 
@@ -50,10 +48,10 @@ class Namespace(
         get() = roomClients.keys.toSet()
 
     override val broadcastOperations: BroadcastOperations
-        get() = SingleRoomBroadcastOperations(clients.values, name, name, storeFactory)
+        get() = SingleRoomBroadcastOperations(clients.values, name, name)
 
     override fun getRoomOperations(room: String): BroadcastOperations {
-        return SingleRoomBroadcastOperations(getRoomClients(room).toList(), name, room, storeFactory)
+        return SingleRoomBroadcastOperations(getRoomClients(room).toList(), name, room)
     }
 
     fun addClient(client: SocketIOClient) {
@@ -72,9 +70,9 @@ class Namespace(
         eventClass: Class<*>,
         listener: DataListener
     ) {
-        var entry = eventListeners[eventName] ?: EventEntry().also { eventListeners.putIfAbsent(eventName, it) }
+        val entry = eventListeners[eventName] ?: EventEntry().also { eventListeners.putIfAbsent(eventName, it) }
         entry.addListener(listener)
-        jsonSupport.addEventMapping(name, eventName, eventClass)
+        configuration.jsonSupport.addEventMapping(name, eventName, eventClass)
     }
 
     override fun addEventInterceptor(eventInterceptor: EventInterceptor) {
@@ -91,7 +89,7 @@ class Namespace(
         try {
             val listeners = entry.listeners
             for (dataListener in listeners) {
-                val data = getEventData(args, dataListener)
+                val data = getEventData(args)
                 dataListener.onData(client, data, ackRequest)
             }
             for (eventInterceptor in eventInterceptors) {
@@ -114,8 +112,7 @@ class Namespace(
     }
 
     private fun getEventData(
-        args: List<Any>,
-        dataListener: DataListener
+        args: List<Any>
     ): Any {
         require(args.isNotEmpty())
         return args[0]
@@ -191,7 +188,7 @@ class Namespace(
     }
 
     override fun addListeners(listeners: Any, listenersClass: Class<*>) {
-        engine.scan(this, listeners, listenersClass)
+        scannerEngine.scan(this, listeners, listenersClass)
     }
 
     fun joinRoom(room: String, sessionId: UUID) {

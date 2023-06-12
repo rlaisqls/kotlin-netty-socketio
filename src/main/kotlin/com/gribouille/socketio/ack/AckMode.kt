@@ -1,5 +1,5 @@
 
-package com.gribouille.socketio
+package com.gribouille.socketio.ack
 
 enum class AckMode {
     /**

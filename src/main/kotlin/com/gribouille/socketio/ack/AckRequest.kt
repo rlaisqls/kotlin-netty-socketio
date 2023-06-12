@@ -1,20 +1,17 @@
 
-package com.gribouille.socketio
+package com.gribouille.socketio.ack
 
+import com.gribouille.socketio.SocketIOClient
 import com.gribouille.socketio.listener.DataListener
 import com.gribouille.socketio.protocol.Packet
 import com.gribouille.socketio.protocol.PacketType
 import java.util.concurrent.atomic.AtomicBoolean
 
-class AckRequest(originalPacket: Packet, client: SocketIOClient) {
-    private val originalPacket: Packet
+class AckRequest(
+    private val originalPacket: Packet,
     private val client: SocketIOClient
+) {
     private val sended: AtomicBoolean = AtomicBoolean()
-
-    init {
-        this.originalPacket = originalPacket
-        this.client = client
-    }
 
     val isAckRequested: Boolean
         get() = originalPacket.isAckRequested

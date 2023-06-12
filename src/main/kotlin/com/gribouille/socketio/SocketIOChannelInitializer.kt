@@ -1,22 +1,15 @@
 
 package com.gribouille.socketio
 
-import com.gribouille.socketio.ack.AckManager
-import com.gribouille.socketio.handler.AuthorizeHandler
+import com.gribouille.socketio.ack.ackManager
 import com.gribouille.socketio.handler.ClientHead
-import com.gribouille.socketio.handler.ClientsBox
-import com.gribouille.socketio.handler.EncoderHandler
-import com.gribouille.socketio.handler.InPacketHandler
-import com.gribouille.socketio.handler.PacketListener
-import com.gribouille.socketio.handler.WrongUrlHandler
-import com.gribouille.socketio.namespace.NamespacesHub
-import com.gribouille.socketio.protocol.PacketDecoder
-import com.gribouille.socketio.protocol.PacketEncoder
-import com.gribouille.socketio.scheduler.CancelableScheduler
-import com.gribouille.socketio.scheduler.HashedWheelTimeoutScheduler
-import com.gribouille.socketio.store.StoreFactory
-import com.gribouille.socketio.transport.PollingTransport
-import com.gribouille.socketio.transport.WebSocketTransport
+import com.gribouille.socketio.handler.authorizeHandler
+import com.gribouille.socketio.handler.encoderHandler
+import com.gribouille.socketio.handler.packetHandler
+import com.gribouille.socketio.handler.wrongUrlHandler
+import com.gribouille.socketio.scheduler.scheduler
+import com.gribouille.socketio.transport.pollingTransport
+import com.gribouille.socketio.transport.webSocketTransport
 import io.netty.channel.Channel
 import io.netty.channel.ChannelHandlerContext
 import io.netty.channel.ChannelInitializer
@@ -28,97 +21,56 @@ import io.netty.handler.codec.http.HttpRequestDecoder
 import io.netty.handler.codec.http.HttpResponseEncoder
 import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketServerCompressionHandler
 import org.slf4j.LoggerFactory
-import javax.net.ssl.KeyManagerFactory
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
 
-class SocketIOChannelInitializer : ChannelInitializer<Channel>(), DisconnectableHub {
-
-    private var ackManager: AckManager? = null
-    private val clientsBox: ClientsBox = ClientsBox()
-    private var authorizeHandler: AuthorizeHandler? = null
-    private var xhrPollingTransport: PollingTransport? = null
-    private var webSocketTransport: WebSocketTransport? = null
-    private var encoderHandler: EncoderHandler? = null
-    private var wrongUrlHandler: WrongUrlHandler? = null
-    private val scheduler: CancelableScheduler = HashedWheelTimeoutScheduler()
-    private var packetHandler: InPacketHandler? = null
-    private var configuration: Configuration? = null
+open class SocketIOChannelInitializer : ChannelInitializer<Channel>() {
 
     override fun handlerAdded(ctx: ChannelHandlerContext) {
         scheduler.update(ctx)
     }
 
     fun start(
-        configuration: Configuration,
-        namespacesHub: NamespacesHub?
+        customConfiguration: SocketIOConfiguration,
     ) {
-        this.configuration = configuration
-        ackManager = AckManager(scheduler)
-        val jsonSupport = configuration.jsonSupport!!
-        val encoder = PacketEncoder(configuration, jsonSupport)
-        val decoder = PacketDecoder(jsonSupport, ackManager!!)
-
-        val factory = configuration.storeFactory
-        authorizeHandler = AuthorizeHandler(
-            configuration.context,
-            scheduler,
-            configuration,
-            namespacesHub!!,
-            factory,
-            this,
-            ackManager!!,
-            clientsBox
-        )
-        xhrPollingTransport = PollingTransport(decoder, authorizeHandler!!, clientsBox)
-        webSocketTransport = WebSocketTransport(authorizeHandler!!, configuration, scheduler, clientsBox)
-        val packetListener = PacketListener(namespacesHub, ackManager!!, scheduler)
-        packetHandler = InPacketHandler(packetListener, decoder, namespacesHub, configuration.exceptionListener)
-        encoderHandler = EncoderHandler(configuration, encoder)
-        wrongUrlHandler = WrongUrlHandler()
+        configuration = customConfiguration
     }
 
     @Throws(Exception::class)
-    protected override fun initChannel(ch: Channel) {
-        val pipeline: ChannelPipeline = ch.pipeline()
+    override fun initChannel(ch: Channel) {
+        val pipeline = ch.pipeline()
         addSocketioHandlers(pipeline)
     }
 
     protected fun addSocketioHandlers(pipeline: ChannelPipeline) {
-        pipeline.addLast(HTTP_REQUEST_DECODER, HttpRequestDecoder())
-        pipeline.addLast(HTTP_AGGREGATOR, object : HttpObjectAggregator(configuration!!.maxHttpContentLength) {
-            override fun newContinueResponse(
-                start: HttpMessage, maxContentLength: Int,
-                pipeline: ChannelPipeline
-            ): Any? {
-                return null
-            }
-        })
-        pipeline.addLast(HTTP_ENCODER, HttpResponseEncoder())
-        if (configuration!!.isHttpCompression) {
-            pipeline.addLast(HTTP_COMPRESSION, HttpContentCompressor())
+        with(pipeline) {
+            addLast(HTTP_REQUEST_DECODER, HttpRequestDecoder())
+            addLast(HTTP_AGGREGATOR, object : HttpObjectAggregator(configuration.maxHttpContentLength) {
+                override fun newContinueResponse(
+                    start: HttpMessage, maxContentLength: Int,
+                    pipeline: ChannelPipeline
+                ): Any? {
+                    return null
+                }
+            })
+            addLast(HTTP_ENCODER, HttpResponseEncoder())
+            if (configuration.isHttpCompression)
+                addLast(HTTP_COMPRESSION, HttpContentCompressor())
+            addLast(PACKET_HANDLER, packetHandler)
+            addLast(AUTHORIZE_HANDLER, authorizeHandler)
+            addLast(XHR_POLLING_TRANSPORT, pollingTransport)
+            if (configuration.isWebsocketCompression)
+                addLast(WEB_SOCKET_TRANSPORT_COMPRESSION, WebSocketServerCompressionHandler())
+            addLast(WEB_SOCKET_TRANSPORT, webSocketTransport)
+            addLast(SOCKETIO_ENCODER, encoderHandler)
+            addLast(WRONG_URL_HANDLER, wrongUrlHandler)
         }
-        pipeline.addLast(PACKET_HANDLER, packetHandler)
-        pipeline.addLast(AUTHORIZE_HANDLER, authorizeHandler)
-        pipeline.addLast(XHR_POLLING_TRANSPORT, xhrPollingTransport)
-        if (configuration!!.isWebsocketCompression) {
-            pipeline.addLast(WEB_SOCKET_TRANSPORT_COMPRESSION, WebSocketServerCompressionHandler())
-        }
-        pipeline.addLast(WEB_SOCKET_TRANSPORT, webSocketTransport)
-        pipeline.addLast(SOCKETIO_ENCODER, encoderHandler)
-        pipeline.addLast(WRONG_URL_HANDLER, wrongUrlHandler)
     }
 
-    override fun onDisconnect(client: ClientHead) {
-        ackManager!!.onDisconnect(client)
-        authorizeHandler!!.onDisconnect(client)
-        configuration!!.storeFactory.onDisconnect(client)
-        log.debug("Client with sessionId: {} disconnected", client.sessionId)
+    protected fun setDisconnectableHub(customDisconnectableHub: DisconnectableHub) {
+        disconnectableHub = customDisconnectableHub
     }
 
     fun stop() {
-        val factory: StoreFactory = configuration!!.storeFactory
-        factory.shutdown()
+        configuration.storeFactory.shutdown()
         scheduler.shutdown()
     }
 
@@ -137,6 +89,18 @@ class SocketIOChannelInitializer : ChannelInitializer<Channel>(), Disconnectable
         const val SSL_HANDLER = "ssl"
         const val RESOURCE_HANDLER = "resourceHandler"
         const val WRONG_URL_HANDLER = "wrongUrlBlocker"
-        private val log = LoggerFactory.getLogger(SocketIOChannelInitializer::class.java)
+
     }
+}
+
+internal var disconnectableHub = object : DisconnectableHub by DisconnectableHubImpl() {}
+internal class DisconnectableHubImpl : DisconnectableHub {
+
+    override fun onDisconnect(client: ClientHead) {
+        ackManager.onDisconnect(client)
+        authorizeHandler.onDisconnect(client)
+        configuration.storeFactory.onDisconnect(client)
+        log.debug("Client with sessionId: {} disconnected", client.sessionId)
+    }
+    private val log = LoggerFactory.getLogger(SocketIOChannelInitializer::class.java)
 }

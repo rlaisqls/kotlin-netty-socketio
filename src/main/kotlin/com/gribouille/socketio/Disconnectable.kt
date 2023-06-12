@@ -6,3 +6,5 @@ import com.gribouille.socketio.handler.ClientHead
 interface Disconnectable {
     fun onDisconnect(client: ClientHead)
 }
+
+interface DisconnectableHub : Disconnectable

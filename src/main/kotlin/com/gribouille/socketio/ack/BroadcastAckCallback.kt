@@ -1,10 +1,15 @@
 
-package com.gribouille.socketio
+package com.gribouille.socketio.ack
 
+import com.gribouille.socketio.SocketIOClient
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
-class BroadcastAckCallback<T> @JvmOverloads constructor(val resultClass: Class<T>, val timeout: Int = -1) {
+class BroadcastAckCallback<T> (
+    val resultClass: Class<T>,
+    val timeout: Int = -1
+) {
+
     val loopFinished = AtomicBoolean()
     val counter = AtomicInteger()
     val successExecuted = AtomicBoolean()
@@ -12,6 +17,7 @@ class BroadcastAckCallback<T> @JvmOverloads constructor(val resultClass: Class<T
     fun createClientCallback(client: SocketIOClient?): AckCallback {
         counter.getAndIncrement()
         return object : AckCallback(resultClass, timeout) {
+
             override fun onSuccess(result: Any?) {
                 counter.getAndDecrement()
                 onClientSuccess(client, result)

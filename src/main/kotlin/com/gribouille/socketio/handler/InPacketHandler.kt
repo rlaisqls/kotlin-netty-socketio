@@ -1,14 +1,12 @@
 
 package com.gribouille.socketio.handler
 
-import com.gribouille.socketio.listener.ExceptionListener
+import com.gribouille.socketio.exceptionListener
 import com.gribouille.socketio.messages.PacketsMessage
-import com.gribouille.socketio.namespace.NamespacesHub
+import com.gribouille.socketio.namespace.namespacesHub
 import com.gribouille.socketio.protocol.Packet
-import com.gribouille.socketio.protocol.PacketDecoder
 import com.gribouille.socketio.protocol.PacketType
-import com.gribouille.socketio.transport.NamespaceClient
-import io.netty.buffer.ByteBuf
+import com.gribouille.socketio.protocol.packetDecoder
 import io.netty.channel.ChannelHandler
 import io.netty.channel.ChannelHandler.Sharable
 import io.netty.channel.ChannelHandlerContext
@@ -16,34 +14,23 @@ import io.netty.channel.SimpleChannelInboundHandler
 import io.netty.util.CharsetUtil
 import org.slf4j.LoggerFactory
 
-@Sharable
-class InPacketHandler(
-    private val packetListener: PacketListener,
-    decoder: PacketDecoder,
-    namespacesHub: NamespacesHub,
-    exceptionListener: ExceptionListener
-) : SimpleChannelInboundHandler<PacketsMessage?>() {
-    private val decoder: PacketDecoder
-    private val namespacesHub: NamespacesHub
-    private val exceptionListener: ExceptionListener
+interface InPacketHandler: ChannelHandler
 
-    init {
-        this.decoder = decoder
-        this.namespacesHub = namespacesHub
-        this.exceptionListener = exceptionListener
-    }
+internal val packetHandler: InPacketHandler = @Sharable object :
+    InPacketHandler, SimpleChannelInboundHandler<PacketsMessage?>() {
 
     @Throws(Exception::class)
-    protected override fun channelRead0(ctx: ChannelHandlerContext?, message: PacketsMessage?) {
+    override fun channelRead0(ctx: ChannelHandlerContext?, message: PacketsMessage?) {
         val content = message!!.content
         val client = message.client
+
         if (log.isTraceEnabled) {
             log.trace("In message: {} sessionId: {}", content.toString(CharsetUtil.UTF_8), client.sessionId)
         }
         while (content.isReadable) {
             try {
-                val packet = decoder.decodePackets(content, client)
-                if (packet.hasAttachments() && !packet.isAttachmentsLoaded) {
+                val packet = packetDecoder.decodePackets(content, client)
+                if (packet.isAttachmentsNotLoaded) {
                     return
                 }
                 val ns = namespacesHub[packet.nsp] ?: run {
@@ -67,17 +54,20 @@ class InPacketHandler(
                 }
                 val nClient = client.getChildClient(ns) ?: run {
                     log.debug(
-                        "Can't find namespace client in namespace: {}, sessionId: {} probably it was disconnected.",
-                        ns.name,
-                        client.sessionId
+                        "Can't find namespace client in namespace: ${ns.name}," +
+                                "sessionId: ${client.sessionId} probably it was disconnected."
                     )
                     return
                 }
-                packetListener.onPacket(packet, nClient, message.transport)
-            } catch (ex: Exception) {
-                val c: String = content.toString(CharsetUtil.UTF_8)
-                log.error("Error during data processing. Client sessionId: " + client.sessionId + ", data: " + c, ex)
-                throw ex
+                packetListener.onPacket(
+                    packet = packet,
+                    client = nClient,
+                    transport = message.transport
+                )
+            } catch (e: Exception) {
+                log.error("Error during data processing. Client sessionId: ${client.sessionId}," +
+                        "data: ${content.toString(CharsetUtil.UTF_8)}", e)
+                throw e
             }
         }
     }
@@ -90,7 +80,5 @@ class InPacketHandler(
         }
     }
 
-    companion object {
-        private val log = LoggerFactory.getLogger(InPacketHandler::class.java)
-    }
+    private val log = LoggerFactory.getLogger(InPacketHandler::class.java)
 }

@@ -1,18 +1,19 @@
 
 package com.gribouille.socketio.transport
 
-import com.gribouille.socketio.AckCallback
 import com.gribouille.socketio.HandshakeData
 import com.gribouille.socketio.SocketIOClient
 import com.gribouille.socketio.Transport
+import com.gribouille.socketio.ack.AckCallback
+import com.gribouille.socketio.ack.ackManager
 import com.gribouille.socketio.handler.ClientHead
 import com.gribouille.socketio.namespace.Namespace
 import com.gribouille.socketio.protocol.Packet
 import com.gribouille.socketio.protocol.PacketType
-import org.slf4j.LoggerFactory
 import java.net.SocketAddress
-import java.util.*
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import org.slf4j.LoggerFactory
 
 class NamespaceClient(
     val baseClient: ClientHead,
@@ -73,8 +74,7 @@ class NamespaceClient(
             ackCallback.onTimeout()
             return
         }
-        val index = baseClient.ackManager
-            .registerAck(sessionId, ackCallback)
+        val index = ackManager.registerAck(sessionId, ackCallback)
         packet.ackId = index
         send(packet)
     }

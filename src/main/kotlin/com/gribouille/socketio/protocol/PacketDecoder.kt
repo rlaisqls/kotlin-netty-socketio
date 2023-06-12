@@ -1,8 +1,9 @@
 
 package com.gribouille.socketio.protocol
 
-import com.gribouille.socketio.ack.AckManager
+import com.gribouille.socketio.ack.ackManager
 import com.gribouille.socketio.handler.ClientHead
+import com.gribouille.socketio.jsonSupport
 import io.netty.buffer.ByteBuf
 import io.netty.buffer.ByteBufInputStream
 import io.netty.buffer.Unpooled
@@ -13,11 +14,12 @@ import java.net.URLDecoder
 import java.util.LinkedList
 import kotlin.math.min
 
-class PacketDecoder(
-    private val jsonSupport: JsonSupport,
-    private val ackManager: AckManager
-) {
-    private val QUOTES: ByteBuf = Unpooled.copiedBuffer("\"", CharsetUtil.UTF_8)
+interface PackerDecoder {
+    fun preprocessJson(jsonIndex: Int?, content: ByteBuf): ByteBuf
+    fun decodePackets(buffer: ByteBuf, client: ClientHead): Packet
+}
+
+internal val packetDecoder = object : PackerDecoder {
 
     private fun isStringPacket(content: ByteBuf): Boolean {
         return content.getByte(content.readerIndex()).toInt() == 0x0
@@ -25,7 +27,7 @@ class PacketDecoder(
 
     // TODO optimize
     @Throws(IOException::class)
-    fun preprocessJson(jsonIndex: Int?, content: ByteBuf): ByteBuf {
+    override fun preprocessJson(jsonIndex: Int?, content: ByteBuf): ByteBuf {
         var packet: String = URLDecoder.decode(content.toString(CharsetUtil.UTF_8), CharsetUtil.UTF_8.name())
         if (jsonIndex != null) {
             /**
@@ -80,7 +82,7 @@ class PacketDecoder(
     }
 
     @Throws(IOException::class)
-    fun decodePackets(buffer: ByteBuf, client: ClientHead): Packet {
+    override fun decodePackets(buffer: ByteBuf, client: ClientHead): Packet {
 
         if (isStringPacket(buffer)) {
 
@@ -138,6 +140,7 @@ class PacketDecoder(
         packet.subType = innerType
         parseHeader(frame, packet, innerType)
         parseBody(head, frame, packet)
+
         return packet
     }
 
@@ -148,11 +151,12 @@ class PacketDecoder(
             }
         }
         val attachmentsDividerIndex = frame.bytesBefore(endIndex, '-'.code.toByte())
-
         val hasAttachments = attachmentsDividerIndex != -1
-        if (hasAttachments && (PacketType.BINARY_EVENT == innerType || PacketType.BINARY_ACK == innerType)) {
-            val attachments = readLong(frame, attachmentsDividerIndex).toInt()
-            packet.initAttachments(attachments)
+
+        if (hasAttachments && (innerType == PacketType.BINARY_EVENT || innerType == PacketType.BINARY_ACK)) {
+            packet.initAttachments(
+                attachmentsCount = readLong(frame, attachmentsDividerIndex).toInt()
+            )
             frame.readerIndex(frame.readerIndex() + 1)
             endIndex -= attachmentsDividerIndex + 1
         }
@@ -173,8 +177,7 @@ class PacketDecoder(
                 packet.ackId = java.lang.Long.valueOf(ackId)
             }
         } else {
-            val ackId = readLong(frame, endIndex)
-            packet.ackId = ackId
+            packet.ackId = readLong(frame, endIndex)
         }
     }
 
@@ -209,18 +212,17 @@ class PacketDecoder(
             }
             frame.readerIndex(frame.readerIndex() + frame.readableBytes())
 
-            if (binaryPacket.isAttachmentsLoaded) {
+            if (binaryPacket.isAttachmentsNotLoaded) {
                 val slices = LinkedList<ByteBuf>()
                 val source = binaryPacket.dataSource!!
 
                 for (i in binaryPacket.attachments.indices) {
                     val attachment = binaryPacket.attachments[i]!!
-                    var scanValue =
-                        Unpooled.copiedBuffer("{\"_placeholder\":true,\"num\":$i}", CharsetUtil.UTF_8)
-                    var pos = PacketEncoder.find(source, scanValue)
+                    var scanValue = Unpooled.copiedBuffer("{\"_placeholder\":true,\"num\":$i}", CharsetUtil.UTF_8)
+                    var pos = packetEncoder.find(source, scanValue)
                     if (pos == -1) {
                         scanValue = Unpooled.copiedBuffer("{\"num\":$i,\"_placeholder\":true}", CharsetUtil.UTF_8)
-                        pos = PacketEncoder.find(source, scanValue)
+                        pos = packetEncoder.find(source, scanValue)
                         check(pos != -1) { "Can't find attachment by index: $i in packet source" }
                     }
                     val prefixBuf = source.slice(source.readerIndex(), pos - source.readerIndex())
@@ -245,17 +247,19 @@ class PacketDecoder(
 
     private fun parseBody(head: ClientHead, frame: ByteBuf, packet: Packet) {
         if (packet.type == PacketType.MESSAGE) {
+
             if (packet.subType == PacketType.CONNECT || packet.subType == PacketType.DISCONNECT) {
                 packet.nsp = readNamespace(frame)
             }
-            if (packet.hasAttachments() && !packet.isAttachmentsLoaded) {
+            if (packet.isAttachmentsNotLoaded) {
                 packet.dataSource = Unpooled.copiedBuffer(frame)
                 frame.readerIndex(frame.readableBytes())
                 head.lastBinaryPacket = packet
+                if (packet.isAttachmentsNotLoaded) {
+                    return
+                }
             }
-            if (packet.hasAttachments() && !packet.isAttachmentsLoaded) {
-                return
-            }
+
             when (packet.subType) {
                 PacketType.ACK, PacketType.BINARY_ACK -> {
                     val inputStream = ByteBufInputStream(frame)
@@ -280,7 +284,7 @@ class PacketDecoder(
          * /message?a=1,
          * /message,
          */
-        val buffer: ByteBuf = frame.slice()
+        val buffer = frame.slice()
         // skip this frame
         frame.readerIndex(frame.readerIndex() + frame.readableBytes())
         var endIndex = buffer.bytesBefore('?'.code.toByte())
@@ -292,4 +296,6 @@ class PacketDecoder(
             readString(buffer, endIndex)
         } else readString(buffer)
     }
+
+    private val QUOTES: ByteBuf = Unpooled.copiedBuffer("\"", CharsetUtil.UTF_8)
 }

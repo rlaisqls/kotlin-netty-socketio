@@ -1,27 +1,30 @@
 package com.gribouille.socketio.annotation
 
-import com.gribouille.socketio.AckRequest
 import com.gribouille.socketio.SocketIOClient
+import com.gribouille.socketio.ack.AckRequest
 import com.gribouille.socketio.handler.SocketIOException
 import com.gribouille.socketio.listener.ConnectListener
 import com.gribouille.socketio.listener.DataListener
 import com.gribouille.socketio.namespace.Namespace
-import com.gribouille.socketio.protocol.Event
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 
-object SocketAnnotationScanner {
+interface SocketAnnotationScanner {
+    fun addListener(namespace: Namespace, obj: Any, method: Method, annotation: Annotation)
+}
 
-    fun addListener(
+internal val socketAnnotationScanner = object : SocketAnnotationScanner {
+
+    override fun addListener(
         namespace: Namespace,
         obj: Any,
         method: Method,
         annotation: Annotation
     ) {
         when (annotation.annotationClass) {
-            OnConnect::class -> addConnectionListener(namespace, obj, method, annotation)
-            OnDisconnect::class -> addConnectionListener(namespace, obj, method, annotation)
-            OnEvent::class -> addOnEventListener(namespace, obj, method, annotation)
+            OnConnect::class -> addConnectionListener(namespace, obj, method, annotation as OnConnect)
+            OnDisconnect::class -> addConnectionListener(namespace, obj, method, annotation as OnDisconnect)
+            OnEvent::class -> addOnEventListener(namespace, obj, method, annotation as OnEvent)
         }
     }
 
@@ -39,13 +42,12 @@ object SocketAnnotationScanner {
         })
     }
 
-    private fun addOnEventListener(namespace: Namespace, obj: Any?, method: Method, annot: Annotation) {
+    private fun addOnEventListener(namespace: Namespace, obj: Any?, method: Method, annotation: OnEvent) {
 
-        val annotation = annot as OnEvent
         require(annotation.value.trim { it <= ' ' }.isNotEmpty()) { "OnEvent \"value\" parameter is required" }
 
         val requestType = getDataType(method)
-        namespace.addEventListener(annotation.value, Any::class.java, object : DataListener {
+        namespace.addEventListener(annotation.value, requestType, object : DataListener {
             override fun onData(client: SocketIOClient, data: Any, ackSender: AckRequest) {
                 try {
                     val args: MutableList<Any> = ArrayList()

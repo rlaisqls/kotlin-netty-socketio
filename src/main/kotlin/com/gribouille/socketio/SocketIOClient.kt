@@ -1,6 +1,7 @@
 
 package com.gribouille.socketio
 
+import com.gribouille.socketio.ack.AckCallback
 import com.gribouille.socketio.protocol.Packet
 import com.gribouille.socketio.store.Store
 import java.net.SocketAddress

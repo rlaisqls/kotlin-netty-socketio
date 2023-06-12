@@ -1,44 +1,35 @@
 package com.gribouille.socketio.handler
 
 import com.gribouille.socketio.HandshakeData
-import com.gribouille.socketio.Configuration
-import com.gribouille.socketio.DisconnectableHub
 import com.gribouille.socketio.Transport
-import com.gribouille.socketio.ack.AckManager
+import com.gribouille.socketio.configuration
+import com.gribouille.socketio.disconnectableHub
 import com.gribouille.socketio.messages.OutPacketMessage
 import com.gribouille.socketio.namespace.Namespace
 import com.gribouille.socketio.protocol.Packet
 import com.gribouille.socketio.protocol.PacketType
-import com.gribouille.socketio.scheduler.CancelableScheduler
 import com.gribouille.socketio.scheduler.SchedulerKey
 import com.gribouille.socketio.scheduler.SchedulerKey.Type
+import com.gribouille.socketio.scheduler.scheduler
 import com.gribouille.socketio.store.Store
-import com.gribouille.socketio.store.StoreFactory
+import com.gribouille.socketio.storeFactory
 import com.gribouille.socketio.transport.NamespaceClient
 import io.netty.channel.Channel
 import io.netty.channel.ChannelFuture
 import io.netty.channel.ChannelFutureListener
 import io.netty.handler.codec.http.HttpHeaderNames
 import io.netty.util.AttributeKey
-import org.slf4j.LoggerFactory
 import java.net.SocketAddress
-import java.time.LocalDateTime
-import java.util.*
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import org.slf4j.LoggerFactory
 
 class ClientHead(
     @Volatile
     private var currentTransport: Transport,
-    private val scheduler: CancelableScheduler,
-    private val configuration: Configuration,
-    private val clientsBox: ClientsBox,
-    private val disconnectableHub: DisconnectableHub,
     val sessionId: UUID?,
-    val ackManager: AckManager,
-    val handshakeData: HandshakeData,
-    storeFactory: StoreFactory,
+    val handshakeData: HandshakeData
 ) {
     private val disconnected: AtomicBoolean = AtomicBoolean()
     private val namespaceClients: MutableMap<Namespace?, NamespaceClient> = ConcurrentHashMap()
@@ -77,12 +68,12 @@ class ClientHead(
         return send(packet, getCurrentTransport())
     }
 
-    fun cancelPing() {
+    private fun cancelPing() {
         val key = SchedulerKey(Type.PING, sessionId)
         scheduler.cancel(key)
     }
 
-    fun cancelPingTimeout() {
+    private fun cancelPingTimeout() {
         val key = SchedulerKey(Type.PING_TIMEOUT, sessionId)
         scheduler.cancel(key)
     }
@@ -92,7 +83,6 @@ class ClientHead(
         scheduler.schedule(
             key = SchedulerKey(Type.PING, sessionId),
             delay = configuration.pingInterval,
-            unit = TimeUnit.MILLISECONDS,
             runnable = {
                 clientsBox[sessionId]?.run {
                     send(Packet(PacketType.PING))
@@ -104,15 +94,12 @@ class ClientHead(
 
     fun schedulePingTimeout() {
         cancelPingTimeout()
-        val key = SchedulerKey(Type.PING_TIMEOUT, sessionId)
         scheduler.schedule(
-            key = key,
+            key = SchedulerKey(Type.PING_TIMEOUT, sessionId),
             delay = configuration.pingTimeout + configuration.pingInterval,
-            unit = TimeUnit.MILLISECONDS,
             runnable = {
-                val client = clientsBox[sessionId]
-                if (client != null) {
-                    client.disconnect()
+                clientsBox[sessionId]?.let {
+                    it.disconnect()
                     log.debug("{} removed due to ping timeout", sessionId)
                 }
             }
@@ -123,12 +110,9 @@ class ClientHead(
         val state = channels[transport]!!
         state.packetsQueue.add(packet)
         val channel = state.channel
-        return if (channel == null || transport == Transport.POLLING && channel.attr(
-                EncoderHandler.WRITE_ONCE
-            ).get() != null
-        ) {
-            null
-        } else sendPackets(transport, channel)
+        return if (channel == null || transport == Transport.POLLING &&
+            channel.attr(EncoderHandler.WRITE_ONCE).get() != null
+        ) null else sendPackets(transport, channel)
     }
 
     private fun sendPackets(transport: Transport, channel: Channel?): ChannelFuture {
@@ -142,15 +126,13 @@ class ClientHead(
         }
     }
 
-    fun getChildClient(namespace: Namespace): NamespaceClient? {
-        return namespaceClients[namespace]
-    }
+    fun getChildClient(namespace: Namespace) =
+        namespaceClients[namespace]
 
-    fun addNamespaceClient(namespace: Namespace): NamespaceClient {
-        val client = NamespaceClient(this, namespace)
-        namespaceClients[namespace] = client
-        return client
-    }
+    fun addNamespaceClient(namespace: Namespace) =
+        NamespaceClient(this, namespace).also {
+            namespaceClients[namespace] = it
+        }
 
     val namespaces: Set<Any?>
         get() = namespaceClients.keys
@@ -167,9 +149,7 @@ class ClientHead(
     val isChannelOpen: Boolean
         get() {
             for (state in channels.values) {
-                if (state.channel != null && state.channel!!.isActive) {
-                    return true
-                }
+                if (state.channel != null && state.channel!!.isActive) return true
             }
             return false
         }
@@ -197,23 +177,22 @@ class ClientHead(
         val state = channels[currentTransport]!!
         for ((key, value) in channels) {
             if (key != currentTransport) {
-                val queue = value.packetsQueue
-                state.packetsQueue = queue
+
+                state.packetsQueue = value.packetsQueue
                 sendPackets(currentTransport, state.channel)
                 this.currentTransport = currentTransport
+
                 log.debug("Transport upgraded to: {} for: {}", currentTransport, sessionId)
                 break
             }
         }
     }
 
-    fun getCurrentTransport(): Transport {
-        return currentTransport
-    }
+    fun getCurrentTransport() =
+        currentTransport
 
-    fun getPacketsQueue(transport: Transport): Queue<Packet?>? {
-        return channels[transport]!!.packetsQueue
-    }
+    fun getPacketsQueue(transport: Transport) =
+        channels[transport]!!.packetsQueue
 
     companion object {
         private val log = LoggerFactory.getLogger(ClientHead::class.java)

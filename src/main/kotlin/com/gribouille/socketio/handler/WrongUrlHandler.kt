@@ -2,6 +2,7 @@
 package com.gribouille.socketio.handler
 
 import io.netty.channel.ChannelFutureListener
+import io.netty.channel.ChannelHandler
 import io.netty.channel.ChannelHandler.Sharable
 import io.netty.channel.ChannelHandlerContext
 import io.netty.channel.ChannelInboundHandlerAdapter
@@ -12,8 +13,11 @@ import io.netty.handler.codec.http.HttpVersion
 import io.netty.handler.codec.http.QueryStringDecoder
 import org.slf4j.LoggerFactory
 
-@Sharable
-class WrongUrlHandler : ChannelInboundHandlerAdapter() {
+interface WrongUrlHandler: ChannelHandler
+
+internal val wrongUrlHandler: WrongUrlHandler = @Sharable object :
+    WrongUrlHandler, ChannelInboundHandlerAdapter() {
+
     @Throws(Exception::class)
     override fun channelRead(ctx: ChannelHandlerContext, msg: Any) {
 
@@ -39,7 +43,5 @@ class WrongUrlHandler : ChannelInboundHandlerAdapter() {
         super.channelRead(ctx, msg)
     }
 
-    companion object {
-        private val log = LoggerFactory.getLogger(WrongUrlHandler::class.java)
-    }
+    private val log = LoggerFactory.getLogger(WrongUrlHandler::class.java)
 }

@@ -1,10 +1,12 @@
 package com.gribouille.socketio
 
+import com.gribouille.socketio.ack.BroadcastAckCallback
 import com.gribouille.socketio.protocol.Packet
 
 class MultiRoomBroadcastOperations(
     private val broadcastOperations: MutableCollection<BroadcastOperations>
 ) : BroadcastOperations {
+
     override val clients: Collection<SocketIOClient>
         get() = HashSet<SocketIOClient>().apply {
             broadcastOperations.forEach {

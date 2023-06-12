@@ -1,21 +1,22 @@
 
 package com.gribouille.socketio.transport
 
-import com.gribouille.socketio.Configuration
 import com.gribouille.socketio.SocketIOChannelInitializer
 import com.gribouille.socketio.Transport
-import com.gribouille.socketio.handler.AuthorizeHandler
+import com.gribouille.socketio.configuration
 import com.gribouille.socketio.handler.ClientHead
-import com.gribouille.socketio.handler.ClientsBox
+import com.gribouille.socketio.handler.authorizeHandler
+import com.gribouille.socketio.handler.clientsBox
 import com.gribouille.socketio.messages.PacketsMessage
 import com.gribouille.socketio.protocol.Packet
 import com.gribouille.socketio.protocol.PacketType
-import com.gribouille.socketio.scheduler.CancelableScheduler
 import com.gribouille.socketio.scheduler.SchedulerKey
+import com.gribouille.socketio.scheduler.scheduler
 import io.netty.buffer.ByteBufHolder
 import io.netty.channel.Channel
 import io.netty.channel.ChannelFuture
 import io.netty.channel.ChannelFutureListener
+import io.netty.channel.ChannelHandler
 import io.netty.channel.ChannelHandler.Sharable
 import io.netty.channel.ChannelHandlerContext
 import io.netty.channel.ChannelInboundHandlerAdapter
@@ -29,17 +30,17 @@ import io.netty.handler.codec.http.websocketx.TextWebSocketFrame
 import io.netty.handler.codec.http.websocketx.WebSocketFrameAggregator
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshaker
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshakerFactory
-import org.slf4j.LoggerFactory
 import java.util.*
-import java.util.concurrent.TimeUnit
+import org.slf4j.LoggerFactory
 
-@Sharable
-class WebSocketTransport(
-    val authorizeHandler: AuthorizeHandler,
-    val configuration: Configuration,
-    val scheduler: CancelableScheduler,
-    val clientsBox: ClientsBox
-) : ChannelInboundHandlerAdapter() {
+interface WebSocketTransport : ChannelHandler {
+    companion object {
+        const val NAME = "websocket"
+    }
+}
+
+internal val webSocketTransport: WebSocketTransport = @Sharable object :
+    WebSocketTransport, ChannelInboundHandlerAdapter() {
 
     @Throws(Exception::class)
     override fun channelRead(ctx: ChannelHandlerContext, msg: Any) {
@@ -47,6 +48,7 @@ class WebSocketTransport(
             is CloseWebSocketFrame -> {
                 ctx.channel().writeAndFlush(msg).addListener(ChannelFutureListener.CLOSE)
             }
+
             is BinaryWebSocketFrame, is TextWebSocketFrame -> {
                 val frame = msg as ByteBufHolder
                 clientsBox[ctx.channel()]?.let { client ->
@@ -68,7 +70,7 @@ class WebSocketTransport(
                 val queryDecoder = QueryStringDecoder(msg.uri())
                 val path = queryDecoder.path()
 
-                if (getParam("transport", queryDecoder) == NAME) try {
+                if (getParam("transport", queryDecoder) == WebSocketTransport.NAME) try {
                     if (!configuration.transports.contains(Transport.WEBSOCKET)) {
                         log.debug(
                             "{} transport not supported by configuration.",
@@ -187,7 +189,6 @@ class WebSocketTransport(
             scheduler.schedule(
                 key = SchedulerKey(SchedulerKey.Type.UPGRADE_TIMEOUT, sessionId),
                 delay = configuration.upgradeTimeout,
-                unit = TimeUnit.MILLISECONDS,
                 runnable = {
                     val clientHead: ClientHead? = clientsBox[sessionId]
                     if (clientHead != null) {
@@ -205,8 +206,5 @@ class WebSocketTransport(
     private fun getWebSocketLocation(req: HttpRequest): String =
         "ws://" + req.headers()[HttpHeaderNames.HOST] + req.uri()
 
-    companion object {
-        const val NAME = "websocket"
-        private val log = LoggerFactory.getLogger(WebSocketTransport::class.java)
-    }
+    private val log = LoggerFactory.getLogger(WebSocketTransport::class.java)
 }

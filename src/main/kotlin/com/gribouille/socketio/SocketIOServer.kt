@@ -3,12 +3,11 @@ package com.gribouille.socketio
 
 import com.gribouille.socketio.listener.*
 import com.gribouille.socketio.namespace.Namespace
-import com.gribouille.socketio.namespace.NamespacesHub
+import com.gribouille.socketio.namespace.namespacesHub
 import io.netty.bootstrap.ServerBootstrap
 import io.netty.channel.ChannelOption
 import io.netty.channel.EventLoopGroup
 import io.netty.channel.FixedRecvByteBufAllocator
-import io.netty.channel.RecvByteBufAllocator
 import io.netty.channel.ServerChannel
 import io.netty.channel.WriteBufferWaterMark
 import io.netty.channel.epoll.EpollEventLoopGroup
@@ -17,28 +16,22 @@ import io.netty.channel.nio.NioEventLoopGroup
 import io.netty.channel.socket.nio.NioServerSocketChannel
 import io.netty.util.concurrent.Future
 import io.netty.util.concurrent.FutureListener
-import org.slf4j.LoggerFactory
 import java.net.InetSocketAddress
 import java.util.*
+import org.slf4j.LoggerFactory
 
 /**
  * Fully thread-safe.
  */
 class SocketIOServer(
-    private val configuration: Configuration,
+    private val configuration: SocketIOConfiguration,
+    private val pipelineFactory: SocketIOChannelInitializer = SocketIOChannelInitializer()
 ) : ClientListeners {
 
-    private val configCopy = Configuration(configuration)
-    private val namespacesHub = NamespacesHub(configCopy)
     private val mainNamespace = addNamespace(Namespace.DEFAULT_NAME)
 
-    private var pipelineFactory: SocketIOChannelInitializer = SocketIOChannelInitializer()
     private var bossGroup: EventLoopGroup? = null
     private var workerGroup: EventLoopGroup? = null
-
-    fun setPipelineFactory(pipelineFactory: SocketIOChannelInitializer) {
-        this.pipelineFactory = pipelineFactory
-    }
 
     val allClients: Collection<SocketIOClient>
         get() = namespacesHub[Namespace.DEFAULT_NAME]!!.allClients
@@ -97,11 +90,11 @@ class SocketIOServer(
      * @return void
      */
     fun startAsync(): Future<Void> {
-        log.info("Session store / pubsub factory used: {}", configCopy.storeFactory)
+        log.info("Session store / pubsub factory used: {}", configuration.storeFactory)
+        pipelineFactory.start(configuration)
         initGroups()
-        pipelineFactory.start(configCopy, namespacesHub)
 
-        val channelClass: Class<out ServerChannel?> = if (configCopy.isUseLinuxNativeEpoll) {
+        val channelClass: Class<out ServerChannel?> = if (configuration.isUseLinuxNativeEpoll) {
             EpollServerSocketChannel::class.java
         } else NioServerSocketChannel::class.java
 
@@ -114,36 +107,33 @@ class SocketIOServer(
 
         applyConnectionOptions(b)
 
-        val addr = configCopy.hostname?.let {
-            InetSocketAddress(it, configCopy.port)
-        } ?: InetSocketAddress(configCopy.port)
+        val addr = configuration.hostname?.let {
+            InetSocketAddress(it, configuration.port)
+        } ?: InetSocketAddress(configuration.port)
 
         return b.bind(addr)
             .addListener(object : FutureListener<Void?> {
                 @Throws(Exception::class)
                 override fun operationComplete(future: Future<Void?>) {
                     if (future.isSuccess) {
-                        log.info("SocketIO server started at port: {}", configCopy.port)
+                        log.info("SocketIO server started at port: {}", configuration.port)
                     } else {
-                        log.error("SocketIO server start failed at port: {}!", configCopy.port)
+                        log.error("SocketIO server start failed at port: {}!", configuration.port)
                     }
                 }
             }).sync()
     }
 
     protected fun applyConnectionOptions(bootstrap: ServerBootstrap) {
-        val config = configCopy.socketConfig
+        val config = configuration.socketConfig
         with(bootstrap) {
             childOption(ChannelOption.TCP_NODELAY, config.isTcpNoDelay)
             childOption(ChannelOption.SO_KEEPALIVE, config.isTcpKeepAlive)
             childOption(ChannelOption.SO_LINGER, config.soLinger)
             option(ChannelOption.SO_REUSEADDR, config.isReuseAddress)
             option(ChannelOption.SO_BACKLOG, config.acceptBackLog)
-
-            if (config.tcpSendBufferSize != -1) {
+            if (config.tcpSendBufferSize != -1)
                 childOption(ChannelOption.SO_SNDBUF, config.tcpSendBufferSize)
-            }
-
             if (config.tcpReceiveBufferSize != -1) {
                 childOption(ChannelOption.SO_RCVBUF, config.tcpReceiveBufferSize)
                 childOption(
@@ -151,7 +141,6 @@ class SocketIOServer(
                     FixedRecvByteBufAllocator(config.tcpReceiveBufferSize)
                 )
             }
-
             //default value @see WriteBufferWaterMark.DEFAULT
             if (config.writeBufferWaterMarkLow != -1 && config.writeBufferWaterMarkHigh != -1) {
                 childOption(
@@ -164,12 +153,12 @@ class SocketIOServer(
     }
 
     protected fun initGroups() {
-        if (configCopy.isUseLinuxNativeEpoll) {
-            bossGroup = EpollEventLoopGroup(configCopy.bossThreads)
-            workerGroup = EpollEventLoopGroup(configCopy.workerThreads)
+        if (configuration.isUseLinuxNativeEpoll) {
+            bossGroup = EpollEventLoopGroup(configuration.bossThreads)
+            workerGroup = EpollEventLoopGroup(configuration.workerThreads)
         } else {
-            bossGroup = NioEventLoopGroup(configCopy.bossThreads)
-            workerGroup = NioEventLoopGroup(configCopy.workerThreads)
+            bossGroup = NioEventLoopGroup(configuration.bossThreads)
+            workerGroup = NioEventLoopGroup(configuration.workerThreads)
         }
     }
 
@@ -181,7 +170,7 @@ class SocketIOServer(
     }
 
     fun addNamespace(name: String): SocketIONamespace {
-        return namespacesHub.create(name)
+        return namespacesHub.create(name, configuration)
     }
 
     fun getNamespace(name: String): SocketIONamespace {
@@ -199,7 +188,7 @@ class SocketIOServer(
      *
      * @return Configuration object
      */
-    fun getConfiguration(): Configuration {
+    fun getConfiguration(): SocketIOConfiguration {
         return configuration
     }
 

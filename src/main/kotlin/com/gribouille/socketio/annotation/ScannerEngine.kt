@@ -3,15 +3,19 @@ package com.gribouille.socketio.annotation
 import com.gribouille.socketio.namespace.Namespace
 import org.slf4j.LoggerFactory
 
-class ScannerEngine {
+internal interface ScannerEngine {
+    fun scan(namespace: Namespace, obj: Any, clazz: Class<*>)
+}
+
+internal val scannerEngine = object : ScannerEngine {
 
     @Throws(IllegalArgumentException::class)
-    fun scan(namespace: Namespace, obj: Any, clazz: Class<*>) {
+    override fun scan(namespace: Namespace, obj: Any, clazz: Class<*>) {
         val methods = clazz.declaredMethods
         for (method in methods) {
             for (annotation in SocketAnnotation.annotations) {
                 method.getAnnotation(annotation.java)?.let {
-                    SocketAnnotationScanner.addListener(
+                    socketAnnotationScanner.addListener(
                         namespace = namespace,
                         obj = obj,
                         method = method,
@@ -23,7 +27,5 @@ class ScannerEngine {
         }
     }
 
-    companion object {
-        private val log = LoggerFactory.getLogger(ScannerEngine::class.java)
-    }
+    private val log = LoggerFactory.getLogger(ScannerEngine::class.java)
 }

@@ -10,15 +10,19 @@ class Packet(
     var nsp: String = Namespace.DEFAULT_NAME,
     var data: Any? = null
 ) : Serializable {
+
     var subType: PacketType? = null
     var ackId: Long? = null
     var name: String? = null
     var attachments: MutableList<ByteBuf?> = mutableListOf()
-    private var attachmentsCount = 0
     var dataSource: ByteBuf? = null
 
-    val isAttachmentsLoaded: Boolean
-        get() = attachments.size == attachmentsCount
+    val isAttachmentsNotLoaded: Boolean
+        get() = hasAttachments && attachments.size != attachmentsCount
+
+    private var attachmentsCount = 0
+    val hasAttachments: Boolean
+        get() = attachmentsCount != 0
 
     @JvmName("getTypedData")
     fun <T> getData(): T {
@@ -29,16 +33,16 @@ class Packet(
         return if (nsp.equals(namespace, ignoreCase = true)) {
             this
         } else {
-            val newPacket = Packet(type)
-            newPacket.ackId = ackId
-            newPacket.data = data
-            newPacket.dataSource = dataSource
-            newPacket.name = name
-            newPacket.subType = subType
-            newPacket.nsp = nsp
-            newPacket.attachments = attachments
-            newPacket.attachmentsCount = attachmentsCount
-            newPacket
+            Packet(type).also {
+                it.ackId = this.ackId
+                it.data = this.data
+                it.dataSource = this.dataSource
+                it.name = this.name
+                it.subType = this.subType
+                it.nsp = this.nsp
+                it.attachments = this.attachments
+                it.attachmentsCount = this.attachmentsCount
+            }
         }
     }
 
@@ -55,15 +59,7 @@ class Packet(
         }
     }
 
-    fun hasAttachments(): Boolean {
-        return attachmentsCount != 0
-    }
-
     override fun toString(): String {
         return "Packet [type=$type, ackId=$ackId, data=$data]"
-    }
-
-    companion object {
-        private const val serialVersionUID = 4560159536486711426L
     }
 }

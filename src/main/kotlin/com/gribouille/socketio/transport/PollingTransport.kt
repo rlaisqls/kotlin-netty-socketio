@@ -1,16 +1,17 @@
 package com.gribouille.socketio.transport
 
 import com.gribouille.socketio.Transport
-import com.gribouille.socketio.handler.AuthorizeHandler
 import com.gribouille.socketio.handler.ClientHead
-import com.gribouille.socketio.handler.ClientsBox
 import com.gribouille.socketio.handler.EncoderHandler
-import com.gribouille.socketio.messages.PacketsMessage
+import com.gribouille.socketio.handler.authorizeHandler
+import com.gribouille.socketio.handler.clientsBox
 import com.gribouille.socketio.messages.OptionsMessage
+import com.gribouille.socketio.messages.PacketsMessage
 import com.gribouille.socketio.messages.PostMessage
-import com.gribouille.socketio.protocol.PacketDecoder
+import com.gribouille.socketio.protocol.packetDecoder
 import io.netty.buffer.ByteBuf
 import io.netty.channel.ChannelFutureListener
+import io.netty.channel.ChannelHandler
 import io.netty.channel.ChannelHandler.Sharable
 import io.netty.channel.ChannelHandlerContext
 import io.netty.channel.ChannelInboundHandlerAdapter
@@ -22,16 +23,18 @@ import io.netty.handler.codec.http.HttpResponse
 import io.netty.handler.codec.http.HttpResponseStatus
 import io.netty.handler.codec.http.HttpVersion
 import io.netty.handler.codec.http.QueryStringDecoder
-import org.slf4j.LoggerFactory
 import java.io.IOException
 import java.util.*
+import org.slf4j.LoggerFactory
 
-@Sharable
-class PollingTransport(
-    private val decoder: PacketDecoder,
-    private val authorizeHandler: AuthorizeHandler,
-    private val clientsBox: ClientsBox
-) : ChannelInboundHandlerAdapter() {
+interface PollingTransport: ChannelHandler {
+    companion object {
+        const val NAME = "polling"
+    }
+}
+
+internal val pollingTransport: PollingTransport = @Sharable object :
+    PollingTransport, ChannelInboundHandlerAdapter() {
 
     @Throws(Exception::class)
     override fun channelRead(
@@ -40,7 +43,7 @@ class PollingTransport(
     ) {
         if (msg is FullHttpRequest) {
             val queryDecoder = QueryStringDecoder(msg.uri())
-            if (getParam("transport", queryDecoder) == NAME) {
+            if (queryDecoder.getParam("transport") == PollingTransport.NAME) {
 
                 ctx.channel().attr(EncoderHandler.ORIGIN).set(
                     msg.headers().get(HttpHeaderNames.ORIGIN)
@@ -49,18 +52,18 @@ class PollingTransport(
                     msg.headers().get(HttpHeaderNames.USER_AGENT)
                 )
 
-                getParam("j", queryDecoder)?.let { j ->
+                queryDecoder.getParam("j")?.let { j ->
                     val index = Integer.valueOf(j)
                     ctx.channel().attr(EncoderHandler.JSONP_INDEX).set(index)
                 }
 
-                getParam("b64", queryDecoder)?.let { b64 ->
+                queryDecoder.getParam("b64")?.let { b64 ->
                     val enable = (b64 == "1" || b64 == "true")
                     ctx.channel().attr(EncoderHandler.B64).set(enable)
                 }
 
                 try {
-                    getParam("sid", queryDecoder)?.let { sid ->
+                    queryDecoder.getParam("sid")?.let { sid ->
                         val sessionId = UUID.fromString(sid)
                         handleMessage(msg, sessionId, queryDecoder, ctx)
                     } ?: run {
@@ -77,8 +80,8 @@ class PollingTransport(
         ctx.fireChannelRead(msg)
     }
 
-    private fun getParam(pramName: String, queryDecoder: QueryStringDecoder) =
-        queryDecoder.parameters()[pramName]?.get(0)
+    private fun QueryStringDecoder.getParam(pramName: String) =
+        parameters()[pramName]?.get(0)
 
     @Throws(IOException::class)
     private fun handleMessage(
@@ -113,7 +116,7 @@ class PollingTransport(
     }
 
     private fun onOptions(sessionId: UUID, ctx: ChannelHandlerContext, origin: String) {
-        val client: ClientHead? = clientsBox[sessionId]
+        val client = clientsBox[sessionId]
         if (client == null) {
             log.error("{} is not registered. Closing connection", sessionId)
             sendError(ctx)
@@ -142,7 +145,7 @@ class PollingTransport(
         val b64 = ctx.channel().attr(EncoderHandler.B64).get()
         if (b64 == true) {
             val jsonIndex = ctx.channel().attr(EncoderHandler.JSONP_INDEX).get()
-            packetContent = decoder.preprocessJson(jsonIndex, packetContent)
+            packetContent = packetDecoder.preprocessJson(jsonIndex, packetContent)
         }
         ctx.pipeline().fireChannelRead(
             PacketsMessage(
@@ -153,7 +156,7 @@ class PollingTransport(
         )
     }
 
-    protected fun onGet(sessionId: UUID?, ctx: ChannelHandlerContext, origin: String?) {
+    private fun onGet(sessionId: UUID?, ctx: ChannelHandlerContext, origin: String?) {
         val client = clientsBox[sessionId]
         if (client == null) {
             log.error("{} is not registered. Closing connection", sessionId)
@@ -180,8 +183,5 @@ class PollingTransport(
         super.channelInactive(ctx)
     }
 
-    companion object {
-        const val NAME = "polling"
-        private val log = LoggerFactory.getLogger(PollingTransport::class.java)
-    }
+    private val log = LoggerFactory.getLogger(PollingTransport::class.java)
 }

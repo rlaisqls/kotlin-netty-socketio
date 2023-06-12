@@ -1,7 +1,7 @@
 
 package com.gribouille.socketio.listener
 
-import com.gribouille.socketio.AckRequest
+import com.gribouille.socketio.ack.AckRequest
 import com.gribouille.socketio.transport.NamespaceClient
 
 interface EventInterceptor {

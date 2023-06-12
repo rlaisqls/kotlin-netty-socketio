@@ -1,7 +1,8 @@
 
 package com.gribouille.socketio.protocol
 
-import com.gribouille.socketio.AckCallback
+import com.gribouille.socketio.ack.AckArgs
+import com.gribouille.socketio.ack.AckCallback
 import io.netty.buffer.ByteBufInputStream
 import io.netty.buffer.ByteBufOutputStream
 import java.io.IOException

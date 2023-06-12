@@ -1,5 +1,7 @@
 
-package com.gribouille.socketio
+package com.gribouille.socketio.ack
+
+class AckArgs(val args: List<Any>)
 
 abstract class AckCallback(
     val resultClass: Class<*>,

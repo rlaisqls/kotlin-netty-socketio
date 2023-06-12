@@ -1,14 +1,13 @@
 package com.gribouille.socketio
 
+import com.gribouille.socketio.ack.BroadcastAckCallback
 import com.gribouille.socketio.protocol.Packet
 import com.gribouille.socketio.protocol.PacketType
-import com.gribouille.socketio.store.StoreFactory
 
 class SingleRoomBroadcastOperations(
     override val clients: Collection<SocketIOClient>,
     private val namespace: String,
-    private val room: String,
-    private val storeFactory: StoreFactory,
+    private val room: String
 ) : BroadcastOperations {
 
     override fun send(packet: Packet) {

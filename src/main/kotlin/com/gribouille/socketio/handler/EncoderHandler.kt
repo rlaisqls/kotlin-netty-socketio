@@ -1,19 +1,27 @@
 
 package com.gribouille.socketio.handler
 
+import com.gribouille.socketio.Transport
+import com.gribouille.socketio.configuration
+import com.gribouille.socketio.handler.EncoderHandler.Companion.B64
+import com.gribouille.socketio.handler.EncoderHandler.Companion.JSONP_INDEX
+import com.gribouille.socketio.handler.EncoderHandler.Companion.ORIGIN
+import com.gribouille.socketio.handler.EncoderHandler.Companion.USER_AGENT
+import com.gribouille.socketio.handler.EncoderHandler.Companion.WRITE_ONCE
+import com.gribouille.socketio.jsonSupport
 import com.gribouille.socketio.messages.HttpErrorMessage
-import com.gribouille.socketio.Configuration
 import com.gribouille.socketio.messages.HttpMessage
-import com.gribouille.socketio.messages.OutPacketMessage
 import com.gribouille.socketio.messages.OptionsMessage
+import com.gribouille.socketio.messages.OutPacketMessage
 import com.gribouille.socketio.messages.PostMessage
-import com.gribouille.socketio.protocol.PacketEncoder
+import com.gribouille.socketio.protocol.packetEncoder
 import io.netty.buffer.ByteBuf
 import io.netty.buffer.ByteBufOutputStream
 import io.netty.buffer.ByteBufUtil
 import io.netty.channel.Channel
 import io.netty.channel.ChannelFuture
 import io.netty.channel.ChannelFutureListener
+import io.netty.channel.ChannelHandler
 import io.netty.channel.ChannelHandler.Sharable
 import io.netty.channel.ChannelHandlerContext
 import io.netty.channel.ChannelOutboundHandlerAdapter
@@ -30,59 +38,42 @@ import io.netty.handler.codec.http.LastHttpContent
 import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame
 import io.netty.handler.codec.http.websocketx.ContinuationWebSocketFrame
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame
-import io.netty.handler.codec.http.websocketx.WebSocketFrame
 import io.netty.util.AttributeKey
 import io.netty.util.CharsetUtil
 import io.netty.util.concurrent.Future
 import io.netty.util.concurrent.GenericFutureListener
-import org.slf4j.LoggerFactory
 import java.io.IOException
-import java.net.URL
 import java.util.*
-import java.util.jar.Manifest
+import org.slf4j.LoggerFactory
 
-@Sharable
-class EncoderHandler(
-    val configuration: Configuration,
-    val encoder: PacketEncoder
-) : ChannelOutboundHandlerAdapter() {
+
+interface EncoderHandler: ChannelHandler {
+    companion object {
+        val ORIGIN: AttributeKey<String> = AttributeKey.valueOf("origin")
+        val USER_AGENT: AttributeKey<String> = AttributeKey.valueOf("userAgent")
+        val B64: AttributeKey<Boolean> = AttributeKey.valueOf("b64")
+        val JSONP_INDEX: AttributeKey<Int> = AttributeKey.valueOf("jsonpIndex")
+        val WRITE_ONCE: AttributeKey<Boolean> = AttributeKey.valueOf("writeOnce")
+    }
+}
+
+internal val encoderHandler: EncoderHandler = @Sharable object :
+    EncoderHandler, ChannelOutboundHandlerAdapter() {
+
     private var version: String? = null
-
-    init {
-        if (configuration.isAddVersionHeader) {
-            readVersion()
-        }
-    }
-
-    @Throws(IOException::class)
-    private fun readVersion() {
-        val resources: Enumeration<URL> = javaClass.classLoader.getResources("META-INF/MANIFEST.MF")
-        while (resources.hasMoreElements()) {
-            try {
-                val manifest: Manifest = Manifest(resources.nextElement().openStream())
-                val attrs = manifest.mainAttributes ?: continue
-                val name = attrs.getValue("Bundle-Name")
-                if (name != null && name == "netty-socketio") {
-                    version = name + "/" + attrs.getValue("Bundle-Version")
-                    break
-                }
-            } catch (_: IOException) { }
-        }
-    }
 
     private fun write(msg: OptionsMessage, ctx: ChannelHandlerContext, promise: ChannelPromise) {
         val res: HttpResponse = DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK)
         res.headers().add(HttpHeaderNames.SET_COOKIE, "io=" + msg.sessionId)
             .add(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE)
             .add(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, HttpHeaderNames.CONTENT_TYPE)
-        val origin: String = ctx.channel().attr<String>(ORIGIN).get()
-        addOriginHeaders(origin, res)
-        val out = encoder.allocateBuffer(ctx.alloc())
+        addOriginHeaders(ctx.channel(), res)
+        val out = packetEncoder.allocateBuffer(ctx.alloc())
         sendMessage(msg, ctx.channel(), out, res, promise)
     }
 
     private fun write(msg: PostMessage, ctx: ChannelHandlerContext, promise: ChannelPromise) {
-        val out = encoder.allocateBuffer(ctx.alloc())
+        val out = packetEncoder.allocateBuffer(ctx.alloc())
         out.writeBytes(OK)
         sendMessage(msg, ctx.channel(), out, "text/html", promise, HttpResponseStatus.OK)
     }
@@ -101,8 +92,7 @@ class EncoderHandler(
         if (msg.sessionId != null) {
             res.headers().add(HttpHeaderNames.SET_COOKIE, "io=" + msg.sessionId)
         }
-        val origin = channel.attr(ORIGIN).get()
-        addOriginHeaders(origin, res)
+        addOriginHeaders(channel, res)
         HttpUtil.setContentLength(res, out.readableBytes().toLong())
 
         // prevent XSS warnings on IE
@@ -129,7 +119,7 @@ class EncoderHandler(
                 log.trace("Out message: {}", out.toString(CharsetUtil.UTF_8))
             }
         }
-        if (out.isReadable()) {
+        if (out.isReadable) {
             channel.write(DefaultHttpContent(out))
         } else {
             out.release()
@@ -139,13 +129,13 @@ class EncoderHandler(
 
     @Throws(IOException::class)
     private fun sendError(errorMsg: HttpErrorMessage, ctx: ChannelHandlerContext, promise: ChannelPromise) {
-        val encBuf: ByteBuf = encoder.allocateBuffer(ctx.alloc())
+        val encBuf: ByteBuf = packetEncoder.allocateBuffer(ctx.alloc())
         val out = ByteBufOutputStream(encBuf)
-        encoder.jsonSupport.writeValue(out, errorMsg.data)
+        jsonSupport.writeValue(out, errorMsg.data)
         sendMessage(errorMsg, ctx.channel(), encBuf, "application/json", promise, HttpResponseStatus.BAD_REQUEST)
     }
 
-    private fun addOriginHeaders(origin: String?, res: HttpResponse) {
+    private fun addOriginHeaders(channel: Channel, res: HttpResponse) {
         if (version != null) {
             res.headers().add(HttpHeaderNames.SERVER, version)
         }
@@ -153,12 +143,10 @@ class EncoderHandler(
             res.headers().add(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, configuration.origin)
             res.headers().add(HttpHeaderNames.ACCESS_CONTROL_ALLOW_CREDENTIALS, java.lang.Boolean.TRUE)
         } else {
-            if (origin != null) {
-                res.headers().add(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, origin)
+            channel.attr(ORIGIN).get()?.let {
+                res.headers().add(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, channel)
                 res.headers().add(HttpHeaderNames.ACCESS_CONTROL_ALLOW_CREDENTIALS, java.lang.Boolean.TRUE)
-            } else {
-                res.headers().add(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-            }
+            } ?: res.headers().add(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         }
         if (configuration.allowHeaders != null) {
             res.headers().add(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, configuration.allowHeaders)
@@ -167,66 +155,78 @@ class EncoderHandler(
 
     @Throws(Exception::class)
     override fun write(ctx: ChannelHandlerContext, msg: Any, promise: ChannelPromise) {
-        if (msg !is HttpMessage) {
-            super.write(ctx, msg, promise)
-            return
-        }
-        if (msg is OutPacketMessage) {
-            if (msg.transport == com.gribouille.socketio.Transport.WEBSOCKET) {
-                handleWebsocket(msg, ctx, promise)
+        when (msg) {
+            !is HttpMessage -> {
+                super.write(ctx, msg, promise)
+                return
             }
-            if (msg.transport == com.gribouille.socketio.Transport.POLLING) {
-                handleHTTP(msg, ctx, promise)
+            is OutPacketMessage -> {
+                if (msg.transport == Transport.WEBSOCKET) {
+                    handleWebsocket(msg, ctx, promise)
+                }
+                if (msg.transport == Transport.POLLING) {
+                    handleHTTP(msg, ctx, promise)
+                }
             }
-        } else if (msg is OptionsMessage) {
-            write(msg, ctx, promise)
-        } else if (msg is PostMessage) {
-            write(msg, ctx, promise)
-        } else if (msg is HttpErrorMessage) {
-            sendError(msg, ctx, promise)
+            is OptionsMessage -> write(msg, ctx, promise)
+            is PostMessage -> write(msg, ctx, promise)
+            is HttpErrorMessage -> sendError(msg, ctx, promise)
         }
     }
 
     @Throws(IOException::class)
     private fun handleWebsocket(msg: OutPacketMessage, ctx: ChannelHandlerContext, promise: ChannelPromise) {
         val writeFutureList = ChannelFutureList()
-        while (true) {
-            val queue = msg.clientHead.getPacketsQueue(msg.transport)!!
-            val packet = queue.poll()
+
+        outer@ while (true) {
+            val packet = msg.clientHead.getPacketsQueue(msg.transport)!!.poll()
             if (packet == null) {
                 writeFutureList.setChannelPromise(promise)
                 break
             }
-            val out: ByteBuf = encoder.allocateBuffer(ctx.alloc())
-            encoder.encodePacket(packet, out, ctx.alloc(), true)
+
+            val out = packetEncoder.allocateBuffer(ctx.alloc())
+            packetEncoder.encodePacket(packet, out, ctx.alloc(), true)
+
             if (log.isTraceEnabled) {
                 log.trace("Out message: {} sessionId: {}", out.toString(CharsetUtil.UTF_8), msg.sessionId)
             }
-            if (out.isReadable() && out.readableBytes() > configuration.maxFramePayloadLength) {
-                val dstStart: ByteBuf = ByteBufUtil.readBytes(ctx.alloc(), out, FRAME_BUFFER_SIZE)
-                val start: WebSocketFrame = TextWebSocketFrame(false, 0, dstStart)
-                ctx.channel().write(start)
-                while (out.isReadable()) {
-                    val re = if (out.readableBytes() > FRAME_BUFFER_SIZE) FRAME_BUFFER_SIZE else out.readableBytes()
-                    val dst: ByteBuf = ByteBufUtil.readBytes(ctx.alloc(), out, re)
-                    val res: WebSocketFrame = ContinuationWebSocketFrame(if (out.isReadable()) false else true, 0, dst)
-                    ctx.channel().write(res)
+
+            if (out.isReadable && out.readableBytes() > configuration.maxFramePayloadLength) {
+
+                val dstStart = ByteBufUtil.readBytes(ctx.alloc(), out, FRAME_BUFFER_SIZE)
+                ctx.channel().write(
+                    TextWebSocketFrame(false, 0, dstStart)
+                )
+
+                while (out.isReadable) {
+                    val re = if (out.readableBytes() > FRAME_BUFFER_SIZE) {
+                        FRAME_BUFFER_SIZE
+                    } else out.readableBytes()
+                    val dst = ByteBufUtil.readBytes(ctx.alloc(), out, re)
+                    ctx.channel().write(
+                        ContinuationWebSocketFrame(!out.isReadable, 0, dst)
+                    )
                 }
                 ctx.channel().flush()
-            } else if (out.isReadable()) {
-                val res: WebSocketFrame = TextWebSocketFrame(out)
-                ctx.channel().writeAndFlush(res)
+            } else if (out.isReadable) {
+                ctx.channel().writeAndFlush(
+                    TextWebSocketFrame(out)
+                )
             } else {
                 out.release()
             }
             for (buf in packet.attachments) {
-                val outBuf: ByteBuf = encoder.allocateBuffer(ctx.alloc())
-                outBuf.writeByte(4)
-                outBuf.writeBytes(buf)
+                val outBuf = packetEncoder.allocateBuffer(ctx.alloc()).apply {
+                    writeByte(4)
+                    writeBytes(buf)
+                }
                 if (log.isTraceEnabled) {
                     log.trace("Out attachment: {} sessionId: {}", ByteBufUtil.hexDump(outBuf), msg.sessionId)
                 }
-                writeFutureList.add(ctx.channel().writeAndFlush(BinaryWebSocketFrame(outBuf)))
+                writeFutureList.add(
+                    ctx.channel().writeAndFlush(BinaryWebSocketFrame(outBuf))
+                )
             }
         }
     }
@@ -240,18 +240,18 @@ class EncoderHandler(
             promise.trySuccess()
             return
         }
-        val out = encoder.allocateBuffer(ctx.alloc())
+        val out = packetEncoder.allocateBuffer(ctx.alloc())
         val b64 = ctx.channel().attr(B64).get()
         if (b64 != null && b64) {
             val jsonpIndex = ctx.channel().attr(JSONP_INDEX).get()
-            encoder.encodeJsonP(jsonpIndex, queue!!, out, ctx.alloc(), 50)
+            packetEncoder.encodeJsonP(jsonpIndex, queue!!, out, ctx.alloc(), 50)
             var type = "application/javascript"
             if (jsonpIndex == null) {
                 type = "text/plain"
             }
             sendMessage(msg, channel, out, type, promise, HttpResponseStatus.OK)
         } else {
-            encoder.encodePackets(queue!!, out, ctx.alloc(), 50)
+            packetEncoder.encodePackets(queue!!, out, ctx.alloc(), 50)
             sendMessage(msg, channel, out, "application/octet-stream", promise, HttpResponseStatus.OK)
         }
     }
@@ -306,14 +306,7 @@ class EncoderHandler(
         }
     }
 
-    companion object {
-        private val OK = "ok".toByteArray(CharsetUtil.UTF_8)
-        val ORIGIN = AttributeKey.valueOf<String>("origin")
-        val USER_AGENT = AttributeKey.valueOf<String>("userAgent")
-        val B64 = AttributeKey.valueOf<Boolean>("b64")
-        val JSONP_INDEX = AttributeKey.valueOf<Int>("jsonpIndex")
-        val WRITE_ONCE = AttributeKey.valueOf<Boolean>("writeOnce")
-        private val log = LoggerFactory.getLogger(EncoderHandler::class.java)
-        private const val FRAME_BUFFER_SIZE = 8192
-    }
+    private val log = LoggerFactory.getLogger(EncoderHandler::class.java)
+    private val FRAME_BUFFER_SIZE = 8192
+    private val OK = "ok".toByteArray(CharsetUtil.UTF_8)
 }

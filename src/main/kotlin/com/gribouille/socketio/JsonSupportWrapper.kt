@@ -1,12 +1,13 @@
 
 package com.gribouille.socketio
 
-import com.gribouille.socketio.protocol.AckArgs
+import com.gribouille.socketio.ack.AckCallback
+import com.gribouille.socketio.ack.AckArgs
 import com.gribouille.socketio.protocol.JsonSupport
 import io.netty.buffer.ByteBufInputStream
 import io.netty.buffer.ByteBufOutputStream
-import org.slf4j.LoggerFactory
 import java.io.IOException
+import org.slf4j.LoggerFactory
 
 internal class JsonSupportWrapper(
     private val delegate: JsonSupport
@@ -29,7 +30,6 @@ internal class JsonSupportWrapper(
         }
     }
 
-    @Throws(IOException::class)
     override fun <T> readValue(
         namespaceName: String,
         src: ByteBufInputStream,
@@ -44,7 +44,6 @@ internal class JsonSupportWrapper(
         }
     }
 
-    @Throws(IOException::class)
     override fun writeValue(
         out: ByteBufOutputStream,
         value: Any,

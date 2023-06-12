@@ -15,7 +15,7 @@ repositories {
 dependencies {
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.14.2")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
-    implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
+    compileOnly("org.jetbrains.kotlin:kotlin-stdlib")
 
     val nettyVersion = "4.1.86.Final"
     implementation("io.netty:netty-buffer:$nettyVersion")
@@ -26,13 +26,14 @@ dependencies {
     implementation("io.netty:netty-codec:$nettyVersion")
     implementation("io.netty:netty-transport-native-epoll:$nettyVersion")
 
-    val coroutineVersion = "1.6.4"
+    val coroutineVersion = "1.7.1"
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:$coroutineVersion")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutineVersion")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor:$coroutineVersion")
 
     implementation("org.slf4j:slf4j-api:1.7.7")
     implementation("ch.qos.logback:logback-classic:1.1.2")
+    implementation("com.corundumstudio.socketio:netty-socketio:1.7.23")
 }
 
 tasks.withType<KotlinCompile> {
@@ -44,4 +45,16 @@ tasks.withType<KotlinCompile> {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+tasks.withType<Jar> {
+    manifest {
+        attributes(
+            "Main-Class" to "test.Test"
+        )
+    }
+    from(
+        configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) }
+    )
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }

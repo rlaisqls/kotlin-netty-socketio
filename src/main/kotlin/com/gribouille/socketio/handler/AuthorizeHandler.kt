@@ -1,23 +1,21 @@
 package com.gribouille.socketio.handler
 
-import com.gribouille.socketio.HandshakeData
-import com.gribouille.socketio.Configuration
 import com.gribouille.socketio.Disconnectable
-import com.gribouille.socketio.DisconnectableHub
+import com.gribouille.socketio.HandshakeData
 import com.gribouille.socketio.Transport
-import com.gribouille.socketio.ack.AckManager
+import com.gribouille.socketio.ack.AuthPacket
+import com.gribouille.socketio.configuration
 import com.gribouille.socketio.messages.HttpErrorMessage
 import com.gribouille.socketio.namespace.Namespace
-import com.gribouille.socketio.namespace.NamespacesHub
-import com.gribouille.socketio.protocol.AuthPacket
+import com.gribouille.socketio.namespace.namespacesHub
 import com.gribouille.socketio.protocol.Packet
 import com.gribouille.socketio.protocol.PacketType
-import com.gribouille.socketio.scheduler.CancelableScheduler
 import com.gribouille.socketio.scheduler.SchedulerKey
 import com.gribouille.socketio.scheduler.SchedulerKey.Type
-import com.gribouille.socketio.store.StoreFactory
+import com.gribouille.socketio.scheduler.scheduler
 import io.netty.channel.Channel
 import io.netty.channel.ChannelFutureListener
+import io.netty.channel.ChannelHandler
 import io.netty.channel.ChannelHandler.Sharable
 import io.netty.channel.ChannelHandlerContext
 import io.netty.channel.ChannelInboundHandlerAdapter
@@ -25,36 +23,31 @@ import io.netty.handler.codec.http.DefaultHttpResponse
 import io.netty.handler.codec.http.FullHttpRequest
 import io.netty.handler.codec.http.HttpHeaderNames
 import io.netty.handler.codec.http.HttpHeaders
-import io.netty.handler.codec.http.HttpResponse
 import io.netty.handler.codec.http.HttpResponseStatus
 import io.netty.handler.codec.http.HttpVersion
 import io.netty.handler.codec.http.QueryStringDecoder
-import io.netty.handler.codec.http.cookie.Cookie
 import io.netty.handler.codec.http.cookie.ServerCookieDecoder
-import org.slf4j.LoggerFactory
 import java.io.IOException
 import java.net.InetSocketAddress
-import java.util.*
-import java.util.concurrent.TimeUnit
+import java.util.Locale
+import java.util.UUID
+import org.slf4j.LoggerFactory
 
-@Sharable
-class AuthorizeHandler(
-    private val connectPath: String,
-    private val scheduler: CancelableScheduler,
-    private val configuration: Configuration,
-    private val namespacesHub: NamespacesHub,
-    private val storeFactory: StoreFactory,
-    private val disconnectable: DisconnectableHub,
-    private val ackManager: AckManager,
-    private val clientsBox: ClientsBox
-) : ChannelInboundHandlerAdapter(), Disconnectable {
+interface AuthorizeHandler: Disconnectable, ChannelHandler {
+    fun connect(sessionId: UUID?)
+    fun connect(client: ClientHead)
+}
+
+internal val authorizeHandler: AuthorizeHandler = @Sharable object :
+    AuthorizeHandler, ChannelInboundHandlerAdapter() {
+
+    private val connectPath: String = "${configuration.context}/"
 
     @Throws(Exception::class)
     override fun channelActive(ctx: ChannelHandlerContext) {
         scheduler.schedule(
             key = SchedulerKey(Type.PING_TIMEOUT, ctx.channel()),
             delay = configuration.firstDataTimeout,
-            unit = TimeUnit.MILLISECONDS,
             runnable = {
                 ctx.channel().close()
                 log.debug(
@@ -68,7 +61,7 @@ class AuthorizeHandler(
 
     @Throws(Exception::class)
     override fun channelRead(ctx: ChannelHandlerContext, msg: Any) {
-        scheduler.cancel(key = SchedulerKey(Type.PING_TIMEOUT, ctx.channel()))
+        scheduler.cancel(Type.PING_TIMEOUT, ctx.channel())
 
         if (msg is FullHttpRequest) {
             val channel = ctx.channel()
@@ -133,6 +126,7 @@ class AuthorizeHandler(
             writeAndFlushTransportError(channel, origin)
             return false
         }
+
         val transport = try {
             Transport.valueOf(transportValue[0].uppercase(Locale.getDefault()))
         } catch (e: IllegalArgumentException) {
@@ -140,21 +134,17 @@ class AuthorizeHandler(
             writeAndFlushTransportError(channel, origin)
             return false
         }
+
         if (!configuration.transports.contains(transport)) {
             log.error("Unsupported transport for request {}", req.uri())
             writeAndFlushTransportError(channel, origin)
             return false
         }
+
         val client = ClientHead(
             sessionId = sessionId,
-            ackManager = ackManager,
-            disconnectableHub = disconnectable,
-            storeFactory = storeFactory,
             handshakeData = data,
-            clientsBox = clientsBox,
-            currentTransport = transport,
-            scheduler = scheduler,
-            configuration = configuration
+            currentTransport = transport
         )
 
         channel.attr(ClientHead.CLIENT).set(client)
@@ -218,12 +208,12 @@ class AuthorizeHandler(
         return UUID.randomUUID()
     }
 
-    fun connect(sessionId: UUID?) {
+    override fun connect(sessionId: UUID?) {
         val key = SchedulerKey(Type.PING_TIMEOUT, sessionId)
         scheduler.cancel(key)
     }
 
-    fun connect(client: ClientHead) {
+    override fun connect(client: ClientHead) {
         val ns = namespacesHub[Namespace.DEFAULT_NAME]!!
         if (!client.namespaces.contains(ns)) {
             val packet = Packet(PacketType.MESSAGE).apply {
@@ -239,7 +229,5 @@ class AuthorizeHandler(
         clientsBox.removeClient(client.sessionId)
     }
 
-    companion object {
-        private val log = LoggerFactory.getLogger(AuthorizeHandler::class.java)
-    }
+    private val log = LoggerFactory.getLogger(AuthorizeHandler::class.java)
 }

@@ -1,5 +1,6 @@
 package com.gribouille.socketio
 
+import com.gribouille.socketio.ack.BroadcastAckCallback
 import com.gribouille.socketio.protocol.Packet
 
 interface BroadcastOperations : ClientOperations {
