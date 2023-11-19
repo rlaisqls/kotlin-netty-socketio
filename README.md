@@ -1,12 +1,13 @@
 # gribouille
 
-[netty socketio](https://github.com/mrniko/netty-socketio)를 kotlin으로 재작성 및 개선해보는 프로젝트입니다.
+kotlin으로 netty socketio 라이브러리를 구현 및 개선해보는 프로젝트입니다.
 
 ## 목표
 
-- netty 라이브러리를 직접 사용해봄으로써 낮은 추상화 수준의 자바 네트워킹 경험해보기
-- kotlin coroutine을 활용하여 최적화하기
-- 클래스간 의존성을 가지고 있는 기존 아키텍처 개선하기
+- [x] netty 라이브러리를 직접 사용해봄으로써 낮은 추상화 수준의 자바 네트워킹 경험해보기
+- [ ] ~~kotlin coroutine을 활용하여 최적화하기~~
+  - Coroutine을 사용했을 때 Continuation으로 인해 메모리를 더 많이 사용하기에 대용량 트래픽 처리시 Netty의 순수한 NIO보다 성능이 떨어지는 것으로 판단되어 진행하지 않았습니다. (artillery로 부하 생성 및 intellij Profiling tools로 JVM, 스레드 모니터링)
+- [x] 클래스간 복잡한 의존성을 가지고 있는 기존 아키텍처 개선하기 -> object 기반 싱글톤 구조로 변경
 
 ## class diagram
 
