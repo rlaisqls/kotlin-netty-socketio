@@ -25,7 +25,7 @@ netty로 구성되어있는 코드의 전체 구조를 이해하고, 비동기 �
 
 ### varience
 
-다양한 타입의 제네릭을 가질 수 있는 `DataListener<T>`를 `List<DataListener<*>>`로 저장한 후 꺼내왔을때, kotlin에선 class를 알 수 없어 `Nothing`으로 표기되는 문제가 발생했습니다. 이를 통해 `<*>`과 `<?>`의 차이점과 [Mixed-Site Variance](https://rosstate.org/publications/mixedsite/) 등 다양한 공변성 방식이 있음을 알게 되었습니다.
+다양한 타입의 제네릭을 가질 수 있는 `DataListener<T>`를 `List<DataListener<*>>`로 저장한 후 꺼내왔을 때, kotlin에선 class를 알 수 없어 `Nothing`으로 표기되는 문제가 발생했습니다. 이를 통해 `<*>`과 `<?>`의 차이점과 [Mixed-Site Variance](https://rosstate.org/publications/mixedsite/) 등 다양한 공변성 방식이 있음을 알게 되었습니다.
 - [자바<?>와 코틀린<*>](https://github.com/rlaisqls/TIL/blob/main/%EC%96%B8%EC%96%B4%E2%80%85Language/%EC%9E%90%EB%B0%94%3C%EF%BC%9F%3E%EC%99%80%E2%80%85%EC%BD%94%ED%8B%80%EB%A6%B0%3C*%3E.md)
 
 ### coroutine
